@@ -1,5 +1,7 @@
 # MVP — Bounded Agent Handshakes
 
+> **Prerequisite:** the first implementation milestone is the deliberately non-AI substrate in [`infrastructure-mvp.md`](./infrastructure-mvp.md): identity, participant-owned spaces, scoped agent credentials, experiments, versioned documents, and stable Markdown/JSON access. The handshake experiment described here sits on top of that substrate rather than defining its storage, authentication, or UI.
+
 ## Hypothesis
 
 The first Loom experiment asks one question:
