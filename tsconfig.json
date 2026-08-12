@@ -13,9 +13,10 @@
     "skipLibCheck": true
   },
   "include": [
-    "src/**/*.ts",
-    "test/**/*.ts",
-    "test/**/*.d.ts",
-    "vitest.config.ts"
-  ]
+  "src/**/*.ts",
+  "test/**/*.ts",
+  "test/**/*.d.ts",
+  "worker-configuration.d.ts",
+  "vitest.config.ts"
+]
 }
