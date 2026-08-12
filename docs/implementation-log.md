@@ -66,9 +66,12 @@ Initial Codex validation was blocked because its environment could not install n
 - **Executed:** the integration tests confirm that anonymous Markdown/JSON context projections expose public documents only while owner reads can include private documents.
 - **Inspected/Corrected:** the original compatibility date exceeded the newest date supported by the installed local `workerd` test runtime; it was adjusted to a supported date so the Worker test runtime could start.
 - **Inspected/Corrected:** test migration setup originally attempted to execute the complete multi-statement migration as a single D1 statement and failed with SQLite `incomplete input`; setup now executes the migration statements individually.
-- **Unverified:** successful interactive local startup with Wrangler has not yet been demonstrated.
-- **Unverified:** Discord OAuth has not yet been exercised against a real Discord application.
-- **Unverified:** manual browser exercise of create/update/history/delete and the public/private projections has not yet been completed.
+- **Executed:** local D1 migration `0001_initial.sql` applied successfully with 11 commands.
+- **Executed:** Wrangler started the local Worker successfully on port 8787 with the local D1 binding.
+- **Executed:** the login page and My Space UI rendered successfully in a browser.
+- **Executed:** Discord OAuth completed successfully when the local request and callback both used `localhost`; the earlier `127.0.0.1`/`localhost` mismatch exposed an OAuth state-cookie host mismatch.
+- **Executed:** participant documents were created successfully through the browser UI.
+- **Executed:** an anonymous browser read of participant context exposed the public test document and excluded the private test document.
 - **Unverified:** production D1 creation/migration and Cloudflare deployment have not yet been demonstrated.
 
 ### Runtime-repair note
@@ -84,20 +87,63 @@ These were infrastructure/test-harness issues rather than failures of the partic
 
 ### Caveats / things not to accidentally treat as established
 
-- Passing the current four tests establishes only the boundaries they actually exercise; it is not yet evidence that Discord OAuth or browser workflows work end-to-end.
-- Local Worker startup, real OAuth, and production deployment remain separate verification gates.
+- Passing the current tests establishes only the boundaries they actually exercise.
+- The initial browser UI exposed creation/listing but not edit/history/delete; those were API-only until the follow-up below.
+- Production deployment remains a separate verification gate.
 - The current slice intentionally does not implement agent credentials, experiments, handshakes, or AI behavior; their absence is correct, not missing work.
-- The implementation agent's summary referenced commit `6803450`, while the PR head visible through GitHub differed. Treat the merged repository state as authoritative rather than relying on the summary's commit identifier.
+- The implementation agent's first summary referenced commit `6803450`, while the GitHub PR used a different SHA. Treat GitHub repository state as authoritative over Codex-local commit identifiers.
+
+---
+
+## 2026-08-12 — My Space document-management follow-up
+
+**Branch:** `codex/update-my-space-ui-and-local-oauth`
+
+**GitHub commit:** `591a8eec81a927138af22377a66df42dd3fe122e` — `Expose document management in My Space`
+
+**Codex-local commit reported in task summary:** `bdf5b07`
+
+The GitHub branch is one commit ahead of `main`; the GitHub commit is the authoritative review target.
+
+### Task
+
+Expose existing document-management capabilities in My Space without changing backend semantics: show document kind, add edit/update, revision history, and confirmed deletion; keep visibility clear; and eliminate the local `127.0.0.1` versus `localhost` OAuth-state footgun by canonicalizing the local OAuth host rather than weakening state or cookie checks.
+
+### Independently inspected
+
+The actual GitHub diff was inspected.
+
+- **Inspected:** only `src/index.ts`, `src/ui.ts`, and `test/worker.test.ts` change; there is no schema migration and no alternate document mutation API.
+- **Inspected:** document cards now display `kind`, visibility, and current revision alongside title/content.
+- **Inspected:** inline editing sends content and the existing content type to the existing owner-scoped `PUT /api/me/documents/{id}` route; it does not add metadata mutation.
+- **Inspected:** revision history uses the existing owner-scoped `/api/me/documents/{id}/versions` route and displays revision number, timestamp, and content.
+- **Inspected:** deletion uses the existing owner-scoped `DELETE /api/me/documents/{id}` route and requires a browser confirmation explicitly warning that all revision history will be erased.
+- **Inspected:** local OAuth canonicalization is narrowly scoped to `localhost` and `127.0.0.1`. If the OAuth start host and configured callback host differ, Loom redirects the start request to the callback origin before creating OAuth state. Existing state hashing, state-cookie comparison, expiry, and one-time state consumption are unchanged.
+- **Inspected:** the added tests check that the rendered My Space page exposes kind/visibility/edit/history/delete controls and that an OAuth start on `127.0.0.1` redirects to configured `localhost` without setting the state cookie on the wrong host.
+- **Inspected:** the branch is exactly one commit ahead of current `main` and has no unrelated file changes.
+
+### Validation status
+
+Codex could not execute the test suite in its environment because dependency installation was blocked by an npm registry HTTP 403.
+
+- **Reported:** `git diff --check` passed in the Codex environment.
+- **Unverified:** `npm run typecheck` has not yet been run against this follow-up on the normal development machine.
+- **Unverified:** `npm test` has not yet been run against this follow-up on the normal development machine.
+- **Unverified:** edit, history, and confirmed delete have not yet been exercised manually in the browser against this follow-up.
+- **Unverified:** the new OAuth canonicalization has not yet been manually exercised by starting sign-in from `127.0.0.1`.
+
+### Test-quality note
+
+The new "browser UI" test checks the generated HTML/script for the expected controls and request methods; it is useful regression coverage but is not a full DOM/browser interaction test. Manual browser verification remains worthwhile for the actual edit/history/delete behavior.
 
 ### Next verification gate
 
-Before treating this slice as operational rather than locally test-verified:
+After merging or checking out this branch on the normal development machine:
 
-1. pull the latest repository state;
-2. apply the D1 migration locally;
-3. start the Worker with Wrangler;
-4. verify that the human-facing UI renders;
-5. exercise document create/update/history/delete and public/private projections manually;
-6. configure a real Discord OAuth application and complete a sign-in round-trip;
-7. record any runtime fixes and the resulting verification status here;
-8. only then create and migrate production D1 and deploy the Worker.
+1. run `npm run typecheck`;
+2. run `npm test` and confirm the original authorization tests still pass alongside the two new tests;
+3. open My Space and verify kind/visibility/revision display;
+4. edit a document and confirm a new revision appears in history;
+5. delete a disposable document and confirm the UI removes it after the destructive-history warning;
+6. optionally start OAuth from `http://127.0.0.1:8787` and confirm Loom redirects to the canonical `localhost` start before contacting Discord;
+7. update this entry from **Unverified** to **Executed** as evidence permits.
