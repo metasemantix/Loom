@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "loom",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-12",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "loom",
+      "database_id": "replace-with-production-d1-id",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "DISCORD_REDIRECT_URI": "http://localhost:8787/auth/discord/callback"
+  }
+}
