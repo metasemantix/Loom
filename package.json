@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.8.68",
+    "@cloudflare/vitest-pool-workers": "^0.16.9",
     "@cloudflare/workers-types": "^5.20260812.1",
     "typescript": "^5.9.2",
     "vitest": "^4.1.0",
