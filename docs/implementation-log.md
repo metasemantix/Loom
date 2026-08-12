@@ -55,29 +55,49 @@ Confirmed in the diff:
 
 ### Validation status
 
-- **Executed:** `git diff --check` was reported successful by Codex.
-- **Executed:** Codex reported a clean working tree after its commit.
-- **Unverified:** dependencies could not be installed in the Codex environment because the npm registry returned HTTP 403.
-- **Unverified:** the TypeScript typecheck could not complete because Cloudflare/dev dependencies were unavailable.
-- **Unverified:** the Vitest integration suite was not executed for the same dependency-installation reason.
-- **Unverified:** successful local startup, Discord OAuth round-trip, D1 migration execution, and deployment have not yet been demonstrated in a working environment.
+Initial Codex validation was blocked because its environment could not install npm dependencies. The slice was subsequently validated on a normal Windows development machine.
+
+- **Executed:** `npm install` completed after correcting stale/invalid Cloudflare development dependency versions.
+- **Executed:** `npm run typecheck` completes successfully with no TypeScript errors after bringing the Cloudflare/Vitest test typing setup in line with the installed toolchain.
+- **Executed:** `npm test` completes successfully: **1 test file passed, 4 tests passed, 0 failed**.
+- **Executed:** the integration tests confirm cross-participant document isolation for reads, edits, deletion, and revision-history access.
+- **Executed:** the integration tests confirm immutable revision creation for edits and revision erasure on hard deletion.
+- **Executed:** the integration tests confirm authenticated-session and same-origin requirements for mutations.
+- **Executed:** the integration tests confirm that anonymous Markdown/JSON context projections expose public documents only while owner reads can include private documents.
+- **Inspected/Corrected:** the original compatibility date exceeded the newest date supported by the installed local `workerd` test runtime; it was adjusted to a supported date so the Worker test runtime could start.
+- **Inspected/Corrected:** test migration setup originally attempted to execute the complete multi-statement migration as a single D1 statement and failed with SQLite `incomplete input`; setup now executes the migration statements individually.
+- **Unverified:** successful interactive local startup with Wrangler has not yet been demonstrated.
+- **Unverified:** Discord OAuth has not yet been exercised against a real Discord application.
+- **Unverified:** manual browser exercise of create/update/history/delete and the public/private projections has not yet been completed.
+- **Unverified:** production D1 creation/migration and Cloudflare deployment have not yet been demonstrated.
+
+### Runtime-repair note
+
+The first real execution pass exposed several test-toolchain assumptions that static inspection could not establish:
+
+- the originally pinned `@cloudflare/workers-types` version did not exist in npm;
+- the Cloudflare Vitest integration and its ambient test types needed updating for the current toolchain;
+- the Worker compatibility date needed to be supported by the locally installed `workerd` binary;
+- migration setup needed to account for D1 execution semantics.
+
+These were infrastructure/test-harness issues rather than failures of the participant ownership model itself. After correction, all four existing integration tests pass.
 
 ### Caveats / things not to accidentally treat as established
 
-- The presence of integration tests is not equivalent to those tests passing. They remain unexecuted until dependencies can be installed.
-- The implementation has been inspected structurally, but runtime compatibility with the selected Cloudflare/Wrangler package versions is not yet proven.
-- OAuth behavior has not yet been exercised against a real Discord application.
+- Passing the current four tests establishes only the boundaries they actually exercise; it is not yet evidence that Discord OAuth or browser workflows work end-to-end.
+- Local Worker startup, real OAuth, and production deployment remain separate verification gates.
 - The current slice intentionally does not implement agent credentials, experiments, handshakes, or AI behavior; their absence is correct, not missing work.
-- The implementation agent's summary referenced commit `6803450`, while the current PR head visible through GitHub is different. Treat the PR itself as the authoritative review target rather than relying on the summary's commit identifier.
+- The implementation agent's summary referenced commit `6803450`, while the PR head visible through GitHub differed. Treat the merged repository state as authoritative rather than relying on the summary's commit identifier.
 
 ### Next verification gate
 
-Before treating this slice as operational rather than structurally implemented:
+Before treating this slice as operational rather than locally test-verified:
 
-1. install dependencies in a normal development environment;
-2. run `npm run typecheck`;
-3. run `npm test`;
-4. apply the D1 migration locally;
-5. start the Worker;
-6. exercise sign-in, create/update/history/delete, public/private projections, and a cross-participant denial path;
-7. only then merge or record any runtime fixes discovered during that pass.
+1. pull the latest repository state;
+2. apply the D1 migration locally;
+3. start the Worker with Wrangler;
+4. verify that the human-facing UI renders;
+5. exercise document create/update/history/delete and public/private projections manually;
+6. configure a real Discord OAuth application and complete a sign-in round-trip;
+7. record any runtime fixes and the resulting verification status here;
+8. only then create and migrate production D1 and deploy the Worker.
