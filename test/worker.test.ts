@@ -1,4 +1,5 @@
-import { env, SELF } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
 const origin = "http://example.com";
