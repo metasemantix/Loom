@@ -4,7 +4,20 @@ import { json, parseCookies, problem, requireSameOrigin } from "./http";
 import type { Env } from "./types";
 import { loginPage, spacePage } from "./ui";
 
-async function discordStart(env: Env): Promise<Response> {
+function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
+  const requested = new URL(request.url), callback = new URL(redirectUri);
+  const localHosts = new Set(["localhost", "127.0.0.1"]);
+  if (localHosts.has(requested.hostname) && localHosts.has(callback.hostname) && requested.host !== callback.host) {
+    return Response.redirect(`${callback.origin}/auth/discord`, 302);
+  }
+  return null;
+}
+
+async function discordStart(request: Request, env: Env): Promise<Response> {
+  if (env.DISCORD_REDIRECT_URI) {
+    const canonical = canonicalLocalOAuthStart(request, env.DISCORD_REDIRECT_URI);
+    if (canonical) return canonical;
+  }
   if (!env.DISCORD_CLIENT_ID || !env.DISCORD_REDIRECT_URI) return problem(503, "oauth_not_configured", "Discord sign-in is not configured");
   const state = opaque("oauth"), expires = new Date(Date.now() + 10 * 60_000).toISOString();
   await env.DB.prepare(`INSERT INTO oauth_states(state_hash,expires_at) VALUES(?,?)`).bind(await hashSecret(state), expires).run();
@@ -46,7 +59,7 @@ export default {
     const url = new URL(request.url), path = url.pathname;
     if (request.method === "GET" && path === "/") return Response.redirect(`${url.origin}/me`, 302);
     if (request.method === "GET" && path === "/login") return loginPage();
-    if (request.method === "GET" && path === "/auth/discord") return discordStart(env);
+    if (request.method === "GET" && path === "/auth/discord") return discordStart(request, env);
     if (request.method === "GET" && path === "/auth/discord/callback") return discordCallback(request, env);
     const contextMatch = path.match(/^\/participants\/(par_[a-z0-9]+)\/context\.(json|md)$/);
     const principal = await principalFor(request, env);
