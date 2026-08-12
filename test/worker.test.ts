@@ -72,3 +72,26 @@ describe("authorization and stable reads", () => {
     expect(await markdown.text()).toContain("Document: doc_");
   });
 });
+
+describe("browser UI", () => {
+  it("exposes document metadata and the existing edit, history, and confirmed-delete capabilities", async () => {
+    const alice = await participant("alice");
+    const response = await SELF.fetch(`${origin}/me`, { headers: { cookie: alice.cookie } });
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain("Kind: ");
+    expect(html).toContain("Visibility: ");
+    expect(html).toContain("Save revision");
+    expect(html).toContain("Revision history");
+    expect(html).toContain("This cannot be undone.");
+    expect(html).toContain("method:'PUT'");
+    expect(html).toContain("method:'DELETE'");
+  });
+
+  it("redirects a 127.0.0.1 OAuth start to the configured canonical localhost origin", async () => {
+    const response = await SELF.fetch("http://127.0.0.1:8787/auth/discord", { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("http://localhost:8787/auth/discord");
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+});
