@@ -6,6 +6,9 @@ browser sessions, document revision history, and stable authorized Markdown and
 JSON projections. It does **not** include agent credentials, experiments,
 handshakes, or backend AI.
 
+See [`CHANGELOG.md`](./CHANGELOG.md) for notable application and interface
+changes.
+
 ## Local development
 
 1. Create a Discord application and add
