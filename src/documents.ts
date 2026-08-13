@@ -80,7 +80,15 @@ export async function deleteDocument(env: Env, principal: Principal, id: string)
 
 export async function history(env: Env, principal: Principal, id: string): Promise<Response> {
   const document = await ownedDocument(env, principal, id); if (!document) return problem(404, "not_found", "Document not found");
-  const rows = await env.DB.prepare(`SELECT id,version_number,content,content_type,actor_type,actor_id,created_at FROM document_versions WHERE document_id=? ORDER BY version_number DESC`).bind(id).all();
+  const rows = await env.DB.prepare(`
+    SELECT v.id,v.version_number,v.content,v.content_type,v.actor_type,v.actor_id,
+      CASE WHEN v.actor_type='human' THEN COALESCE(u.display_name, 'Unknown person') END actor_display_name,
+      v.created_at
+    FROM document_versions v
+    LEFT JOIN users u ON v.actor_type='human' AND u.id=v.actor_id
+    WHERE v.document_id=?
+    ORDER BY v.version_number DESC
+  `).bind(id).all();
   return json({ versions: rows.results });
 }
 

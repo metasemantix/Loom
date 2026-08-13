@@ -9,6 +9,12 @@ export function spacePage(displayName: string, participantId: string): Response 
 const docs=document.querySelector('#documents');
 function button(label,action){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=action;return b}
 function errorMessage(body){return body&&body.error?body.error.message:'Something went wrong'}
+function revisionAuthor(v){
+  if(v.actor_type==='human')return v.actor_display_name||'Unknown person';
+  if(v.actor_type==='agent')return v.actor_id?'Agent '+v.actor_id:'Agent';
+  if(v.actor_type==='system')return 'System';
+  return 'Unknown actor';
+}
 async function load(){
   const r=await fetch('/api/me/documents'),j=await r.json();
   docs.replaceChildren(...j.documents.map(renderDocument));
@@ -31,7 +37,7 @@ async function showHistory(d,panel){
   panel.replaceChildren();const status=document.createElement('p');status.textContent='Loading revision history…';panel.append(status);
   const r=await fetch('/api/me/documents/'+d.id+'/versions'),j=await r.json();if(!r.ok){status.textContent=errorMessage(j);return}
   const section=document.createElement('section');section.className='history';const title=document.createElement('h3');title.textContent='Revision history';section.append(title);
-  for(const v of j.versions){const h=document.createElement('h4'),date=document.createElement('time'),body=document.createElement('pre');h.textContent='Revision '+v.version_number;date.dateTime=v.created_at;date.textContent=new Date(v.created_at).toLocaleString();body.textContent=v.content;section.append(h,date,body)}
+  for(const v of j.versions){const h=document.createElement('h4'),meta=document.createElement('p'),date=document.createElement('time'),body=document.createElement('pre');h.textContent='Revision '+v.version_number;meta.className='meta';meta.append('By '+revisionAuthor(v)+' · ');date.dateTime=v.created_at;date.textContent=new Date(v.created_at).toLocaleString();meta.append(date);body.textContent=v.content;section.append(h,meta,body)}
   panel.replaceChildren(section);
 }
 async function removeDocument(d){
