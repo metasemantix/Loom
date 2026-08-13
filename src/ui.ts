@@ -36,7 +36,7 @@ function showEdit(d,panel){
 async function showHistory(d,panel){
   panel.replaceChildren();const status=document.createElement('p');status.textContent='Loading revision history…';panel.append(status);
   const r=await fetch('/api/me/documents/'+d.id+'/versions'),j=await r.json();if(!r.ok){status.textContent=errorMessage(j);return}
-  const section=document.createElement('section');section.className='history';const title=document.createElement('h3');title.textContent='Revision history';section.append(title);
+  const section=document.createElement('section');section.className='history';const title=document.createElement('h3'),close=button('Close',()=>panel.replaceChildren());title.textContent='Revision history';section.append(title,close);
   for(const v of j.versions){const h=document.createElement('h4'),meta=document.createElement('p'),date=document.createElement('time'),body=document.createElement('pre');h.textContent='Revision '+v.version_number;meta.className='meta';meta.append('By '+revisionAuthor(v)+' · ');date.dateTime=v.created_at;date.textContent=new Date(v.created_at).toLocaleString();meta.append(date);body.textContent=v.content;section.append(h,meta,body)}
   panel.replaceChildren(section);
 }

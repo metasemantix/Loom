@@ -105,6 +105,7 @@ describe("browser UI", () => {
     expect(html).toContain("Visibility: ");
     expect(html).toContain("Save revision");
     expect(html).toContain("Revision history");
+    expect(html).toContain("close=button('Close',()=>panel.replaceChildren())");
     expect(html).toContain("By '+revisionAuthor(v)+' · ");
     expect(html).toContain("Unknown person");
     expect(html).toContain("Agent '+v.actor_id");
