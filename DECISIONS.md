@@ -60,6 +60,20 @@ Loom should therefore avoid cascading deletion or other mechanisms that imply st
 
 Permissions and sharing interfaces should make this limitation clear enough for users to make informed decisions before sharing.
 
+## Content security and untrusted corpus data
+
+Content that may later be consumed by an agent should be treated as untrusted data rather than trusted instructions merely because it is stored in Loom.
+
+New or changed artifacts should eventually pass through a content security gate capable of detecting suspicious material such as prompt injection, code or script injection, hidden instruction text, suspicious encoded payloads, dangerous markup, poisoned retrieval content, and accidentally exposed secrets.
+
+Deterministic checks should be preferred where possible. AI-assisted semantic scanning may complement them for threats that depend on meaning or context, such as instructions intended to override an agent's trusted instructions or induce unsafe tool use or context exfiltration.
+
+Security scanning should report findings and support outcomes such as clean, suspicious, or blocked. It should not silently rewrite user content.
+
+Trusted agent instructions and capabilities should remain separate from retrieved corpus content. Security scanning is an additional defense and does not make arbitrary stored or shared content inherently trustworthy.
+
+The exact scanning pipeline, enforcement rules, and review process remain architectural questions for later design and may warrant a dedicated security document.
+
 ## Changelog
 
 Loom should maintain a changelog as the project evolves.
