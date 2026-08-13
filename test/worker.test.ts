@@ -25,6 +25,21 @@ async function create(cookie: string, visibility = "private"): Promise<string> {
   return (await response.json<{ document: { id: string } }>()).document.id;
 }
 
+async function zipFiles(response: Response): Promise<Map<string, string>> {
+  const bytes = new Uint8Array(await response.arrayBuffer()), view = new DataView(bytes.buffer);
+  const decoder = new TextDecoder();
+  const files = new Map<string, string>();
+  let offset = 0;
+  while (view.getUint32(offset, true) === 0x04034b50) {
+    const size = view.getUint32(offset + 18, true);
+    const nameLength = view.getUint16(offset + 26, true), extraLength = view.getUint16(offset + 28, true);
+    const nameStart = offset + 30, dataStart = nameStart + nameLength + extraLength;
+    files.set(decoder.decode(bytes.slice(nameStart, nameStart + nameLength)), decoder.decode(bytes.slice(dataStart, dataStart + size)));
+    offset = dataStart + size;
+  }
+  return files;
+}
+
 beforeEach(async () => {
   await env.DB.exec("DELETE FROM sessions; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
 });
@@ -95,6 +110,48 @@ describe("authorization and stable reads", () => {
   });
 });
 
+describe("portable participant export", () => {
+  it("exports private documents and complete revision history only for the signed-in owner", async () => {
+    const alice = await participant("alice"), bob = await participant("bob");
+    const aliceDocument = await create(alice.cookie, "private");
+    const bobDocument = await create(bob.cookie, "public");
+    await SELF.fetch(`${origin}/api/me/documents/${aliceDocument}`, { method: "PUT", headers: { cookie: alice.cookie, origin, "content-type": "application/json" }, body: JSON.stringify({ content: "second revision", contentType: "text/plain" }) });
+
+    const response = await SELF.fetch(`${origin}/api/me/export`, { headers: { cookie: alice.cookie } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/zip");
+    expect(response.headers.get("content-disposition")).toBe(`attachment; filename="loom-space-${alice.id}.zip"`);
+    const files = await zipFiles(response);
+    const manifestText = files.get("manifest.json")!;
+    const manifest = JSON.parse(manifestText) as { participant: { id: string; displayName: string }; documents: Array<{ id: string; visibility: string; currentVersion: { number: number }; revisions: Array<{ versionNumber: number; content: string; actor: { type: string; id: string } }> }> };
+    expect(manifest.participant).toEqual({ id: alice.id, displayName: "User alice" });
+    expect(manifest.documents).toHaveLength(1);
+    expect(manifest.documents[0].id).toBe(aliceDocument);
+    expect(manifest.documents[0].visibility).toBe("private");
+    expect(manifest.documents[0].currentVersion.number).toBe(2);
+    expect(manifest.documents[0].revisions.map((revision) => [revision.versionNumber, revision.content, revision.actor.type, revision.actor.id])).toEqual([
+      [1, "first", "human", alice.userId],
+      [2, "second revision", "human", alice.userId],
+    ]);
+    expect(files.get(`documents/${aliceDocument}/current.txt`)).toBe("second revision");
+    expect(files.get(`documents/${aliceDocument}/revisions/000001.md`)).toBe("first");
+    expect([...files.keys()].join("\n")).not.toContain(bobDocument);
+    expect(manifestText).not.toContain("User bob");
+  });
+
+  it("requires authentication and never serializes session or OAuth secrets", async () => {
+    expect((await SELF.fetch(`${origin}/api/me/export`)).status).toBe(401);
+    const alice = await participant("alice");
+    await create(alice.cookie);
+    await env.DB.prepare("INSERT INTO oauth_states(state_hash,expires_at) VALUES(?,?)").bind("oauth-state-secret", new Date(Date.now() + 60_000).toISOString()).run();
+    const response = await SELF.fetch(`${origin}/api/me/export`, { headers: { cookie: alice.cookie } });
+    const archiveText = new TextDecoder().decode(await response.arrayBuffer());
+    expect(archiveText).not.toContain("session-alice");
+    expect(archiveText).not.toContain(await sha256("session-alice"));
+    expect(archiveText).not.toContain("oauth-state-secret");
+  });
+});
+
 describe("browser UI", () => {
   it("exposes document metadata and the existing edit, history, and confirmed-delete capabilities", async () => {
     const alice = await participant("alice");
@@ -113,6 +170,7 @@ describe("browser UI", () => {
     expect(html).toContain("This cannot be undone.");
     expect(html).toContain("method:'PUT'");
     expect(html).toContain("method:'DELETE'");
+    expect(html).toContain('href="/api/me/export"');
   });
 
   it("redirects a 127.0.0.1 OAuth start to the configured canonical localhost origin", async () => {
