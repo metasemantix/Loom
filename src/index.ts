@@ -2,6 +2,7 @@ import { hashSecret, opaque, principalFor, sessionCookie } from "./auth";
 import { context, createDocument, deleteDocument, history, listDocuments, updateDocument } from "./documents";
 import { json, parseCookies, problem, requireSameOrigin } from "./http";
 import type { Env } from "./types";
+import { exportSpace } from "./export";
 import { loginPage, spacePage } from "./ui";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
@@ -66,6 +67,7 @@ export default {
     if (contextMatch && request.method === "GET") return context(request, env, contextMatch[1], contextMatch[2] as "json" | "md", principal);
     if (!principal) return request.method === "GET" && path === "/me" ? Response.redirect(`${url.origin}/login`, 302) : problem(401, "authentication_required", "Sign in is required");
     if (request.method === "GET" && path === "/me") return spacePage(principal.displayName, principal.participantId);
+    if (request.method === "GET" && path === "/api/me/export") return exportSpace(env, principal);
     if (request.method === "GET" && path === "/api/me") return json({ user: { id: principal.userId, displayName: principal.displayName }, participant: { id: principal.participantId } });
     if (request.method === "GET" && path === "/api/me/documents") return listDocuments(env, principal);
     if (["POST", "PUT", "DELETE"].includes(request.method) && !requireSameOrigin(request)) return problem(403, "invalid_origin", "A same-origin request is required");
