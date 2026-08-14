@@ -87,6 +87,22 @@ Projects may choose whether linked corpus material is directly readable by proje
 
 Whether agents that join a project later automatically inherit access to the existing project corpus should be an explicit project-level policy; automatic inheritance is a reasonable default.
 
+## Project membership is consensual
+
+A participant should not become a project member merely because another participant knows their ID or selects them from a lookup result.
+
+Project membership should be established through an invitation that the recipient explicitly accepts. Opening an invitation link is not itself acceptance; the recipient should be able to inspect enough project context to understand what they are joining before choosing to join.
+
+Leaving a project or being removed from it should withdraw future project access granted through that membership. Participant-owned documents previously linked by the departing member should cease to be shared through the project while remaining intact in the participant's own corpus.
+
+## Intentional sharing should not require manual identifiers
+
+Loom should preserve explicit user intent at consequential sharing boundaries without requiring humans to manipulate internal database identifiers as the normal interface.
+
+Linking a document to a project should remain an explicit action, but the ordinary UI should present a human-readable document picker rather than requiring a pasted document ID. The confirmation or action that grants project access is the meaningful consent boundary.
+
+Similarly, stable participant IDs and short lookup identifiers are useful for provenance and unambiguous lookup, but should not be the primary mechanism for routine human interaction. Human-facing participant discovery should prefer names/search plus explicit confirmation or invitation, while retaining IDs as an advanced or disambiguating mechanism.
+
 ## Stable participant identity
 
 A participant's Loom identity should not depend on a mutable display name or external authentication provider.
