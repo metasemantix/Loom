@@ -1,9 +1,11 @@
 import { hashSecret, opaque, principalFor, sessionCookie } from "./auth";
-import { context, createDocument, deleteDocument, history, listDocuments, updateDocument } from "./documents";
+import { context, createDocument, deleteDocument, history, listDocuments, updateDocument, updateMetadata, uploadDocument } from "./documents";
 import { json, parseCookies, problem, requireSameOrigin } from "./http";
 import type { Env } from "./types";
 import { exportSpace } from "./export";
-import { loginPage, spacePage } from "./ui";
+import { controlRoomPage, loginPage, projectsPage, spacePage } from "./ui";
+import { getProfile, updateProfile } from "./profile";
+import { addMember, createProject, getProject, linkDocument, listProjects, removeMember, unlinkDocument, updateProject } from "./projects";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -67,16 +69,36 @@ export default {
     if (contextMatch && request.method === "GET") return context(request, env, contextMatch[1], contextMatch[2] as "json" | "md", principal);
     if (!principal) return request.method === "GET" && path === "/me" ? Response.redirect(`${url.origin}/login`, 302) : problem(401, "authentication_required", "Sign in is required");
     if (request.method === "GET" && path === "/me") return spacePage(principal.displayName, principal.participantId);
+    if (request.method === "GET" && path === "/control-room") return controlRoomPage();
+    if (request.method === "GET" && path === "/projects") return projectsPage();
     if (request.method === "GET" && path === "/api/me/export") return exportSpace(env, principal);
     if (request.method === "GET" && path === "/api/me") return json({ user: { id: principal.userId, displayName: principal.displayName }, participant: { id: principal.participantId } });
+    if (request.method === "GET" && path === "/api/me/profile") return getProfile(env, principal);
     if (request.method === "GET" && path === "/api/me/documents") return listDocuments(env, principal);
     if (["POST", "PUT", "DELETE"].includes(request.method) && !requireSameOrigin(request)) return problem(403, "invalid_origin", "A same-origin request is required");
+    if (request.method === "PUT" && path === "/api/me/profile") return updateProfile(request, env, principal);
     if (request.method === "POST" && path === "/api/me/documents") return createDocument(request, env, principal);
+    if (request.method === "POST" && path === "/api/me/documents/upload") return uploadDocument(request, env, principal);
     const documentMatch = path.match(/^\/api\/me\/documents\/(doc_[a-z0-9]+)$/);
     if (documentMatch && request.method === "PUT") return updateDocument(request, env, principal, documentMatch[1]);
     if (documentMatch && request.method === "DELETE") return deleteDocument(env, principal, documentMatch[1]);
     const historyMatch = path.match(/^\/api\/me\/documents\/(doc_[a-z0-9]+)\/versions$/);
     if (historyMatch && request.method === "GET") return history(env, principal, historyMatch[1]);
+    const metadataMatch = path.match(/^\/api\/me\/documents\/(doc_[a-z0-9]+)\/metadata$/);
+    if (metadataMatch && request.method === "PUT") return updateMetadata(request, env, principal, metadataMatch[1]);
+    if (request.method === "GET" && path === "/api/projects") return listProjects(env, principal);
+    if (request.method === "POST" && path === "/api/projects") return createProject(request, env, principal);
+    const projectMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)$/);
+    if (projectMatch && request.method === "GET") return getProject(env, principal, projectMatch[1]);
+    if (projectMatch && request.method === "PUT") return updateProject(request, env, principal, projectMatch[1]);
+    const membersMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/members$/);
+    if (membersMatch && request.method === "POST") return addMember(request, env, principal, membersMatch[1]);
+    const memberMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/members\/(par_[a-z0-9]+)$/);
+    if (memberMatch && request.method === "DELETE") return removeMember(env, principal, memberMatch[1], memberMatch[2]);
+    const linksMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/documents$/);
+    if (linksMatch && request.method === "POST") return linkDocument(request, env, principal, linksMatch[1]);
+    const linkMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/documents\/(doc_[a-z0-9]+)$/);
+    if (linkMatch && request.method === "DELETE") return unlinkDocument(env, principal, linkMatch[1], linkMatch[2]);
     return problem(404, "not_found", "Route not found");
   },
 } satisfies ExportedHandler<Env>;

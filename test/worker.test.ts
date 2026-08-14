@@ -41,7 +41,69 @@ async function zipFiles(response: Response): Promise<Map<string, string>> {
 }
 
 beforeEach(async () => {
-  await env.DB.exec("DELETE FROM sessions; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
+  await env.DB.exec("DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
+});
+
+describe("document metadata and uploads", () => {
+  it("lets only the owner change visibility, title, and path and records a distinct event", async () => {
+    const alice = await participant("alice"), bob = await participant("bob"), id = await create(alice.cookie, "private");
+    const mutation = (cookie: string, body: object) => SELF.fetch(`${origin}/api/me/documents/${id}/metadata`, { method: "PUT", headers: { cookie, origin, "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await mutation(bob.cookie, { visibility: "public" })).status).toBe(404);
+    expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`).then((r) => r.json<{documents: unknown[]}>())) .documents).toHaveLength(0);
+    expect((await mutation(alice.cookie, { title: "Renamed", logicalPath: "research/notes.md", visibility: "public" })).status).toBe(200);
+    expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`).then((r) => r.json<{documents: Array<{title:string;logical_path:string}>}>())).documents[0]).toMatchObject({ title: "Renamed", logical_path: "research/notes.md" });
+    expect((await mutation(alice.cookie, { visibility: "private" })).status).toBe(200);
+    expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`).then((r) => r.json<{documents: unknown[]}>())).documents).toHaveLength(0);
+    const history = await SELF.fetch(`${origin}/api/me/documents/${id}/versions`, { headers: { cookie: alice.cookie } }).then((r) => r.json<{events:Array<{actor_id:string;event_type:string;changes:Record<string,{previous:string;new:string}>}>;versions:unknown[]}>());
+    expect(history.versions).toHaveLength(1);
+    expect(history.events[1]).toMatchObject({ event_type: "metadata_changed", actor_id: alice.userId, changes: { title: { previous: "Notes", new: "Renamed" }, logicalPath: { previous: expect.any(String), new: "research/notes.md" }, visibility: { previous: "private", new: "public" } } });
+    expect(history.events[0].changes.visibility).toEqual({ previous: "public", new: "private" });
+  });
+
+  it("rejects conflicting paths and validates upload format, JSON, ownership, and size", async () => {
+    const alice = await participant("alice"), bob = await participant("bob"), first = await create(alice.cookie), second = await create(alice.cookie);
+    const setPath = (id:string,path:string) => SELF.fetch(`${origin}/api/me/documents/${id}/metadata`, { method:"PUT", headers:{cookie:alice.cookie,origin,"content-type":"application/json"}, body:JSON.stringify({logicalPath:path}) });
+    expect((await setPath(first,"folder/item")).status).toBe(200); expect((await setPath(second,"folder/item")).status).toBe(409);
+    async function upload(file: File) { const form=new FormData();form.set("file",file);return SELF.fetch(`${origin}/api/me/documents/upload`,{method:"POST",headers:{cookie:alice.cookie,origin},body:form}); }
+    expect((await upload(new File(["{bad"],"bad.json",{type:"application/json"}))).status).toBe(400);
+    expect((await upload(new File(["x"],"bad.html",{type:"text/html"}))).status).toBe(415);
+    expect((await upload(new File([new Uint8Array(256001)],"large.txt",{type:"text/plain"}))).status).toBe(413);
+    const content="# Exact\n\nunchanged";expect((await upload(new File([content],"artifact.md",{type:"text/markdown"}))).status).toBe(201);
+    const mine=await SELF.fetch(`${origin}/api/me/documents`,{headers:{cookie:alice.cookie}}).then(r=>r.json<{documents:Array<{content:string;original_filename:string}>}>());
+    expect(mine.documents.find(d=>d.original_filename==="artifact.md")?.content).toBe(content);
+    expect((await SELF.fetch(`${origin}/api/me/documents`,{headers:{cookie:bob.cookie}}).then(r=>r.json<{documents:unknown[]}>())).documents).toHaveLength(0);
+  });
+});
+
+describe("Control Room identity", () => {
+  it("renames only the authenticated Loom identity while stable IDs and provenance lookup remain unchanged", async () => {
+    const alice=await participant("alice"),bob=await participant("bob"),id=await create(alice.cookie);
+    const before=await SELF.fetch(`${origin}/api/me/profile`,{headers:{cookie:alice.cookie}}).then(r=>r.json<{participant:{id:string;lookupId:string}}>())
+    expect((await SELF.fetch(`${origin}/api/me/profile`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:"Alice Loom"})})).status).toBe(200);
+    const after=await SELF.fetch(`${origin}/api/me/profile`,{headers:{cookie:alice.cookie}}).then(r=>r.json<{participant:{id:string;displayName:string;lookupId:string}}>())
+    expect(after.participant).toEqual({id:before.participant.id,displayName:"Alice Loom",lookupId:before.participant.lookupId});
+    expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`)).json().then((j:any)=>j.participant.displayName)).resolves.toBe("Alice Loom");
+    await SELF.fetch(`${origin}/api/me/profile`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:"Bob Loom"})});
+    const history=await SELF.fetch(`${origin}/api/me/documents/${id}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(history.versions[0]).toMatchObject({actor_id:alice.userId,actor_display_name:"Alice Loom"});
+  });
+});
+
+describe("project link corpora", () => {
+  it("supports membership and policy reads without transferring document authority", async () => {
+    const alice=await participant("alice"),bob=await participant("bob"),documentId=await create(alice.cookie,"private");
+    const created=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Shared",readAudience:"members_and_agents"})});expect(created.status).toBe(201);const projectId=(await created.json<{project:{id:string}}>()).project.id;
+    expect((await SELF.fetch(`${origin}/api/projects/${projectId}/members`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({participantId:bob.id})})).status).toBe(201);
+    expect((await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})})).status).toBe(201);
+    const view=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<{documents:Array<{id:string;owner_participant_id:string}>}>());expect(view.documents[0]).toMatchObject({id:documentId,owner_participant_id:alice.id});
+    expect((await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"DELETE",headers:{cookie:bob.cookie,origin}})).status).toBe(404);
+    expect((await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({content:"steal",contentType:"text/plain"})})).status).toBe(404);
+    expect((await SELF.fetch(`${origin}/api/projects/${projectId}/documents/${documentId}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}})).status).toBe(204);
+    expect((await SELF.fetch(`${origin}/api/me/documents`,{headers:{cookie:alice.cookie}}).then(r=>r.json<{documents:unknown[]}>())).documents).toHaveLength(1);
+    await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})});
+    await SELF.fetch(`${origin}/api/projects/${projectId}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({readAudience:"agents_only"})});
+    const hidden=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<{documents:unknown[];documentsHiddenFromHumans:boolean}>());expect(hidden).toMatchObject({documents:[],documentsHiddenFromHumans:true});
+    await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}});expect((await env.DB.prepare(`SELECT count(*) count FROM project_documents WHERE document_id=?`).bind(documentId).first<{count:number}>())!.count).toBe(0);
+  });
 });
 
 describe("participant ownership", () => {
