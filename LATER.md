@@ -29,19 +29,118 @@ Implementation choices that may be made pragmatically rather than designed in ad
 
 Choose the simplest reversible option that satisfies the infrastructure contract. These choices must not introduce backend AI, semantic memory, matching, autonomous coordination, a social feed, or other features outside the infrastructure MVP.
 
-## Deferred interface work
+## Human-facing product surfaces
 
-Once the vertical slice exists, the human-facing UI can remain deliberately small:
+As Loom grows beyond the first vertical slice, avoid turning My Space into one screen containing every control.
 
-- sign in;
-- My Space;
-- experiment view;
-- connected-agent permissions.
+Likely surfaces include:
 
-The agent-facing surface should use the same underlying data through stable machine-readable endpoints. Humans should not need to operate APIs or Git, and agents should not need to operate the human UI.
+- **Profile** — lightweight participant identity and public-facing entry points. Rich self-description can remain ordinary corpus documents rather than becoming a rigid profile schema.
+- **Documents** — browse/search, folders and paths, visibility, project/manifest membership, revision history, move/rename/delete, and export.
+- **Create / Upload** — create Markdown, text, or structured artifacts and upload existing files without manual pasting.
+- **Projects / Collaborations** — membership, invitations, linked corpus, manifests/discovery surfaces, access defaults, roles, and lifecycle controls.
+- **Agents** — connected or authorized agents, discovery/read/write grants, bounded capabilities, and revocation.
+- **Control Room** — display name, stable identity/lookup information, connected authentication providers, export, account deletion/withdrawal, security information, and global defaults.
+
+These are conceptual areas rather than a commitment to a particular navigation structure.
+
+## Document administration
+
+Near-term document management should grow beyond create/edit/delete to include:
+
+- changing public/private visibility after creation;
+- freeform folder/path organization independent of permissions;
+- moving and renaming artifacts;
+- title/path search;
+- file upload while preserving original source artifacts;
+- project and discovery-surface membership;
+- portable export.
+
+Full-text search can follow when corpus size justifies it. Semantic search should not be introduced merely because an LLM is available.
+
+## Project and collaboration lifecycle
+
+Projects should develop as shared link corpora over participant-owned artifacts rather than duplicate document stores.
+
+Later project work needs to define:
+
+- creation and invitations;
+- membership and removal;
+- administrators or other roles;
+- what happens when a project creator leaves;
+- archive and project export behavior;
+- project-level discovery/read defaults;
+- whether human members may directly browse linked material or access is agent-only;
+- whether newly authorized agents inherit access to the existing corpus;
+- explicit collaborative-write grants where needed;
+- behavior when a linked source artifact is removed, made private, or deleted.
+
+Project defaults should do most of the work rather than requiring per-agent permissions on every linked artifact.
+
+## Discovery surfaces and manifests
+
+The first deterministic manifest can remain simple, but the longer-term model may include multiple named discovery surfaces rather than one universal corpus index.
+
+Likely examples include a public manifest and one manifest for each project or collaboration. Documents may participate in several discovery surfaces while remaining stored and owned only once.
+
+Future manifest work may add editable descriptions, tags, classifications, or other compact retrieval hints. AI may propose or maintain these fields and suggest manifest membership, but the structures must remain inspectable, portable, and non-authoritative.
+
+Manifest retrieval should remain cheap: discovery queries should not load full document bodies merely to discard them.
+
+## Agent permissions and activity
+
+Agent access should eventually distinguish discovery, read, arbitrary write, and bounded operations.
+
+Useful future controls include:
+
+- project-derived read grants;
+- explicit write grants;
+- bounded capabilities such as adding structured items without rewriting an entire artifact;
+- revocation;
+- an activity/audit view showing which agent read or changed an artifact or invoked a capability.
+
+Trusted agent instructions and capability definitions must remain separate from retrieved corpus content.
+
+## Identity and control room
+
+Participants need a Loom-native identity layer independent of Discord or any other login provider.
+
+Future work should include editable display names and a stable participant identity that does not change when the display name or authentication provider changes. A compact identity representation may be useful specifically for provenance and lookup.
+
+Account deletion/anonymization needs a policy for preserving intelligible historical provenance without retaining more identity information than intended. In particular, different deleted actors should not collapse into one indistinguishable generic identity.
+
+## Invitations, notifications, and contact
+
+A functional activity inbox may eventually cover events such as:
+
+- project invitations;
+- accepted or declined invitations;
+- access or capability requests;
+- relevant shared-document changes;
+- agent authorization events.
+
+This should be operational notification infrastructure, not an engagement feed.
+
+A coherent onboarding path should eventually support invitation → authentication → participant identity → project membership → project discovery.
+
+General direct messaging should remain deferred until Loom has a concrete reason to own the resulting spam, blocking, reporting, retention, and moderation problems. Lightweight contact requests or collaboration invitations may be enough.
+
+## Sharing links
+
+Revocable unlisted/tokenized read links may provide a useful middle ground between fully public documents and authenticated project membership.
+
+Any such mechanism must remain distinct from public visibility and project membership and should be revocable without changing the source artifact's ownership.
+
+## Content security
+
+Before agents routinely ingest arbitrary uploaded or shared material, Loom should develop a content-security pipeline.
+
+Likely layers include deterministic checks for dangerous markup, executable/script content, suspicious encodings, secret patterns, and malformed metadata, with optional AI-assisted semantic checks for prompt injection, retrieval poisoning, tool-use bait, or attempted context exfiltration.
+
+Findings should be visible and reviewable rather than silently rewriting source artifacts.
 
 ## Deferred intelligence
 
-Loom's core backend does not require an LLM. AI belongs at the edges through participating agents. Optional future AI-derived indexing, tagging, summarization, relation extraction, or coordination should remain non-authoritative unless explicitly accepted through a permissioned workflow.
+Loom's core backend does not require an LLM. AI belongs at the edges through participating agents. Optional future AI-derived indexing, tagging, summarization, relation extraction, manifest maintenance, or coordination should remain non-authoritative unless explicitly accepted through a permissioned workflow.
 
 THREAD or another semantic/relation layer remains a later concern. Do not block the first running Loom implementation on it.
