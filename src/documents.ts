@@ -121,9 +121,20 @@ export async function deleteDocument(env: Env, principal: Principal, id: string)
 
 export async function history(env: Env, principal: Principal, id: string): Promise<Response> {
   if (!await ownedDocument(env, principal, id)) return problem(404, "not_found", "Document not found");
-  const versions = await env.DB.prepare(`SELECT v.id,v.version_number,v.content,v.content_type,v.actor_type,v.actor_id,CASE WHEN v.actor_type='human' THEN COALESCE(u.display_name,'Unknown person') END actor_display_name,v.created_at FROM document_versions v LEFT JOIN users u ON v.actor_type='human' AND u.id=v.actor_id WHERE v.document_id=? ORDER BY v.version_number DESC`).bind(id).all();
+  const versions = await env.DB.prepare(`SELECT v.id,v.version_number,v.content,v.content_type,v.actor_type,v.actor_id,CASE WHEN v.actor_type='human' THEN COALESCE(u.display_name,'Unknown person') END actor_display_name,v.created_at FROM document_versions v LEFT JOIN users u ON v.actor_type='human' AND u.id=v.actor_id WHERE v.document_id=? ORDER BY v.version_number DESC`).bind(id).all<Record<string, unknown>>();
   const events = await env.DB.prepare(`SELECT e.id,e.event_type,e.actor_type,e.actor_id,CASE WHEN e.actor_type='human' THEN COALESCE(u.display_name,'Unknown person') END actor_display_name,e.changes_json,e.created_at FROM document_events e LEFT JOIN users u ON e.actor_type='human' AND u.id=e.actor_id WHERE e.document_id=? ORDER BY e.created_at DESC,e.id DESC`).bind(id).all<Record<string, unknown>>();
-  return json({ versions: versions.results, events: events.results.map((event) => ({ ...event, changes: JSON.parse(event.changes_json as string), changes_json: undefined })) });
+  const parsedEvents = events.results.map((event) => ({ ...event, changes: JSON.parse(event.changes_json as string), changes_json: undefined }));
+  const timeline: Array<Record<string, unknown> & { entry_type: string }> = [
+    ...versions.results.map((version) => ({ ...version, entry_type: "content_revision" })),
+    ...parsedEvents.map((event) => ({ ...event, entry_type: "metadata_event" })),
+  ];
+  timeline.sort((left, right) => {
+    const timestamp = String(right["created_at"]).localeCompare(String(left["created_at"]));
+    if (timestamp) return timestamp;
+    // A stable tie-break keeps the API deterministic even at D1's timestamp precision.
+    return String(right["id"]).localeCompare(String(left["id"]));
+  });
+  return json({ versions: versions.results, events: parsedEvents, timeline });
 }
 
 export async function context(_request: Request, env: Env, participantId: string, format: "json" | "md", principal: Principal | null): Promise<Response> {

@@ -41,7 +41,12 @@ export async function removeMember(env:Env,principal:Principal,id:string,partici
   const member=await membership(env,principal,id);if(!member)return problem(404,"not_found","Project not found");
   if(participantId!==principal.participantId&&member.role!=="owner")return problem(403,"forbidden","Only the project owner may remove another member");
   if(participantId===member.created_by_participant_id)return problem(409,"owner_cannot_leave","The project owner cannot leave in this version");
-  await env.DB.prepare(`DELETE FROM project_members WHERE project_id=? AND participant_id=?`).bind(id,participantId).run();return new Response(null,{status:204});
+  // D1 batches are transactional: a successful removal cannot leave the former
+  // member's participant-owned documents shared with the project.
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM project_documents WHERE project_id=? AND document_id IN (SELECT id FROM documents WHERE owner_type='participant' AND owner_id=?)`).bind(id,participantId),
+    env.DB.prepare(`DELETE FROM project_members WHERE project_id=? AND participant_id=?`).bind(id,participantId),
+  ]);return new Response(null,{status:204});
 }
 export async function linkDocument(request:Request,env:Env,principal:Principal,id:string):Promise<Response>{
   if(!await membership(env,principal,id))return problem(404,"not_found","Project not found");let body;try{body=await readJson(request)}catch(error){return problem(400,"invalid_request",(error as Error).message)}

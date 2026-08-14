@@ -60,6 +60,25 @@ describe("document metadata and uploads", () => {
     expect(history.events[0].changes.visibility).toEqual({ previous: "public", new: "private" });
   });
 
+  it("returns content revisions and metadata events as one newest-first timeline", async () => {
+    const alice = await participant("alice"), id = await create(alice.cookie);
+    await SELF.fetch(`${origin}/api/me/documents/${id}/metadata`, { method: "PUT", headers: { cookie: alice.cookie, origin, "content-type": "application/json" }, body: JSON.stringify({ visibility: "public" }) });
+    await SELF.fetch(`${origin}/api/me/documents/${id}`, { method: "PUT", headers: { cookie: alice.cookie, origin, "content-type": "application/json" }, body: JSON.stringify({ content: "second", contentType: "text/plain" }) });
+    const versions = await env.DB.prepare(`SELECT id,version_number FROM document_versions WHERE document_id=? ORDER BY version_number`).bind(id).all<{id:string;version_number:number}>();
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE document_versions SET created_at=? WHERE id=?`).bind("2026-01-01T00:00:00.000Z", versions.results[0].id),
+      env.DB.prepare(`UPDATE document_events SET created_at=? WHERE document_id=?`).bind("2026-01-02T00:00:00.000Z", id),
+      env.DB.prepare(`UPDATE document_versions SET created_at=? WHERE id=?`).bind("2026-01-03T00:00:00.000Z", versions.results[1].id),
+    ]);
+    const history = await SELF.fetch(`${origin}/api/me/documents/${id}/versions`, { headers: { cookie: alice.cookie } }).then((response) => response.json<{timeline:Array<{entry_type:string;created_at:string;version_number?:number;changes?:Record<string,{previous:string;new:string}>}>}>());
+    expect(history.timeline.map((entry) => [entry.entry_type, entry.created_at])).toEqual([
+      ["content_revision", "2026-01-03T00:00:00.000Z"],
+      ["metadata_event", "2026-01-02T00:00:00.000Z"],
+      ["content_revision", "2026-01-01T00:00:00.000Z"],
+    ]);
+    expect(history.timeline[1].changes?.visibility).toEqual({ previous: "private", new: "public" });
+  });
+
   it("rejects conflicting paths and validates upload format, JSON, ownership, and size", async () => {
     const alice = await participant("alice"), bob = await participant("bob"), first = await create(alice.cookie), second = await create(alice.cookie);
     const setPath = (id:string,path:string) => SELF.fetch(`${origin}/api/me/documents/${id}/metadata`, { method:"PUT", headers:{cookie:alice.cookie,origin,"content-type":"application/json"}, body:JSON.stringify({logicalPath:path}) });
@@ -103,6 +122,22 @@ describe("project link corpora", () => {
     await SELF.fetch(`${origin}/api/projects/${projectId}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({readAudience:"agents_only"})});
     const hidden=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<{documents:unknown[];documentsHiddenFromHumans:boolean}>());expect(hidden).toMatchObject({documents:[],documentsHiddenFromHumans:true});
     await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}});expect((await env.DB.prepare(`SELECT count(*) count FROM project_documents WHERE document_id=?`).bind(documentId).first<{count:number}>())!.count).toBe(0);
+  });
+
+  it("revokes only a removed member's project links without deleting source documents", async () => {
+    const alice=await participant("alice"),bob=await participant("bob"),carol=await participant("carol"),bobDocument=await create(bob.cookie,"private"),carolDocument=await create(carol.cookie,"private");
+    const created=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Shared",readAudience:"members_and_agents"})});
+    const projectId=(await created.json<{project:{id:string}}>()).project.id;
+    for(const member of [bob,carol]) expect((await SELF.fetch(`${origin}/api/projects/${projectId}/members`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({participantId:member.id})})).status).toBe(201);
+    for(const [member,documentId] of [[bob,bobDocument],[carol,carolDocument]] as const) expect((await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:member.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})})).status).toBe(201);
+
+    expect((await SELF.fetch(`${origin}/api/projects/${projectId}/members/${bob.id}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}})).status).toBe(204);
+    expect((await env.DB.prepare(`SELECT owner_id FROM documents WHERE id=?`).bind(bobDocument).first<{owner_id:string}>())?.owner_id).toBe(bob.id);
+    const links=await env.DB.prepare(`SELECT document_id FROM project_documents WHERE project_id=? ORDER BY document_id`).bind(projectId).all<{document_id:string}>();
+    expect(links.results.map((link)=>link.document_id)).toEqual([carolDocument]);
+    const view=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:alice.cookie}}).then((response)=>response.json<{documents:Array<{id:string}>}>());
+    expect(view.documents.map((document)=>document.id)).toEqual([carolDocument]);
+    expect((await SELF.fetch(`${origin}/api/me/documents`,{headers:{cookie:bob.cookie}}).then((response)=>response.json<{documents:Array<{id:string}>}>())).documents.map((document)=>document.id)).toContain(bobDocument);
   });
 });
 
@@ -225,7 +260,7 @@ describe("browser UI", () => {
     expect(html).toContain("Save revision");
     expect(html).toContain("Revision history");
     expect(html).toContain("close=button('Close',()=>panel.replaceChildren())");
-    expect(html).toContain("By '+revisionAuthor(v)+' · ");
+    expect(html).toContain("By '+revisionAuthor(entry)+' · ");
     expect(html).toContain("Unknown person");
     expect(html).toContain("Agent '+v.actor_id");
     expect(html).toContain("return 'System'");
@@ -233,6 +268,21 @@ describe("browser UI", () => {
     expect(html).toContain("method:'PUT'");
     expect(html).toContain("method:'DELETE'");
     expect(html).toContain('href="/api/me/export"');
+  });
+
+  it("inserts project and Control Room values with text-only DOM APIs", async () => {
+    const alice = await participant("alice"), dangerous = `<img src=x onerror="alert('xss')">`;
+    await SELF.fetch(`${origin}/api/me/profile`, { method: "PUT", headers: { cookie: alice.cookie, origin, "content-type": "application/json" }, body: JSON.stringify({ displayName: dangerous }) });
+    const created = await SELF.fetch(`${origin}/api/projects`, { method: "POST", headers: { cookie: alice.cookie, origin, "content-type": "application/json" }, body: JSON.stringify({ name: dangerous, readAudience: "members_and_agents" }) });
+    expect((await created.json<{project:{name:string}}>()).project.name).toBe(dangerous);
+    const projectsHtml = await SELF.fetch(`${origin}/projects`, { headers: { cookie: alice.cookie } }).then((response) => response.text());
+    const controlRoomHtml = await SELF.fetch(`${origin}/control-room`, { headers: { cookie: alice.cookie } }).then((response) => response.text());
+    expect(projectsHtml).not.toContain("innerHTML");
+    expect(controlRoomHtml).not.toContain("innerHTML");
+    expect(projectsHtml).toContain("node.textContent=textValue");
+    expect(controlRoomHtml).toContain("content.textContent=value");
+    expect(projectsHtml).not.toContain(dangerous);
+    expect(controlRoomHtml).not.toContain(dangerous);
   });
 
   it("redirects a 127.0.0.1 OAuth start to the configured canonical localhost origin", async () => {
