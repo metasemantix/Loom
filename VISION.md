@@ -144,6 +144,30 @@ One participant might use ChatGPT, another Claude, Gemini, a local model, or a c
 
 The intelligence behind an endpoint is replaceable. The coordination substrate should not depend on one model provider.
 
+## Infrastructure, not a canonical client
+
+Loom should expose a stable substrate that can support multiple human and agent-facing clients rather than defining one mandatory interface.
+
+The generic Loom web application is one client. A specialized application may present the same participant-owned corpus differently or add domain-specific behavior while still respecting Loom's ownership, permission, provenance, and capability rules.
+
+This keeps storage and coordination portable while allowing useful clients to become opinionated.
+
+## Separate axes, composable coordination
+
+Artifact ownership, organization, discovery, access, and capability are separate concerns.
+
+A participant-owned document may live wherever its owner finds convenient, appear in one or more project discovery surfaces, be readable by a particular set of humans or agents, and expose only narrowly bounded write capabilities. None of those facts should have to distort the others.
+
+This separation is intended to prevent folders from becoming security boundaries, projects from becoming duplicate storage, manifests from becoming access-control lists, or agent permissions from becoming arbitrary document ownership.
+
+## Projects as shared views over participant-owned corpora
+
+A project or collaboration should not require participants to surrender or duplicate their source documents into a separate project store.
+
+Instead, participants can explicitly make selected artifacts available to a project. The project then becomes a shared link corpus and discovery surface through which authorized humans and agents can move among those artifacts.
+
+The source remains participant-owned. Removing or deleting it remains meaningful. Project policy can define who may discover and read linked artifacts without turning project membership into blanket write authority.
+
 ## Infrastructure that can learn from use
 
 In the longer term, repeated friction can become structured information.
