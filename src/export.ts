@@ -6,6 +6,8 @@ interface ExportRow {
   title: string;
   logical_path: string;
   visibility: string;
+  original_filename: string | null;
+  original_content_type: string | null;
   document_created_at: string;
   current_version_id: string;
   version_id: string;
@@ -67,7 +69,7 @@ function extension(contentType: string): string {
 
 export async function exportSpace(env: Env, principal: Principal): Promise<Response> {
   const result = await env.DB.prepare(`
-    SELECT d.id document_id,d.kind,d.title,d.logical_path,d.visibility,d.created_at document_created_at,
+    SELECT d.id document_id,d.kind,d.title,d.logical_path,d.visibility,d.original_filename,d.original_content_type,d.created_at document_created_at,
       d.current_version_id,v.id version_id,v.version_number,v.content,v.content_type,
       v.actor_type,v.actor_id,
       CASE WHEN v.actor_type='human' THEN COALESCE(u.display_name, 'Unknown person') END actor_display_name,
@@ -87,6 +89,7 @@ export async function exportSpace(env: Env, principal: Principal): Promise<Respo
   }
 
   const files: Array<{ name: string; content: string }> = [];
+  const eventRows = await env.DB.prepare(`SELECT e.id,e.document_id,e.event_type,e.actor_type,e.actor_id,CASE WHEN e.actor_type='human' THEN COALESCE(u.display_name,'Unknown person') END actor_display_name,e.changes_json,e.created_at FROM document_events e JOIN documents d ON d.id=e.document_id LEFT JOIN users u ON e.actor_type='human' AND u.id=e.actor_id WHERE d.owner_type='participant' AND d.owner_id=? ORDER BY e.created_at,e.id`).bind(principal.participantId).all<Record<string, string | null>>();
   const manifest = {
     schemaVersion: 1,
     exportedAt: new Date().toISOString(),
@@ -102,6 +105,7 @@ export async function exportSpace(env: Env, principal: Principal): Promise<Respo
         kind: first.kind,
         logicalPath: first.logical_path,
         visibility: first.visibility,
+        originalFile: first.original_filename ? { filename: first.original_filename, contentType: first.original_content_type } : null,
         contentType: current.content_type,
         createdAt: first.document_created_at,
         currentVersion: { id: current.version_id, number: current.version_number, createdAt: current.version_created_at, contentType: current.content_type, file: `${directory}/current.${extension(current.content_type)}` },
@@ -114,6 +118,7 @@ export async function exportSpace(env: Env, principal: Principal): Promise<Respo
           file: `${directory}/revisions/${String(revision.version_number).padStart(6, "0")}.${extension(revision.content_type)}`,
           content: revision.content,
         })),
+        events: eventRows.results.filter((event) => event.document_id === first.document_id).map((event) => ({ id: event.id, type: event.event_type, timestamp: event.created_at, actor: { type: event.actor_type, id: event.actor_id, displayName: event.actor_display_name }, changes: JSON.parse(event.changes_json!) })),
       };
     }),
   };

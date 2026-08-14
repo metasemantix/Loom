@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-14
+
+- Added owner-controlled document visibility, title, and logical-path changes
+  with explicit metadata history events separate from content revisions.
+- Added faithful Markdown, text, and validated JSON uploads with source metadata.
+- Added a Control Room for stable Loom identity and editable display names.
+- Added projects as shared references over participant-owned documents, with
+  membership and `members_and_agents` / `agents_only` read-audience policies.
+
 All notable changes to Loom are documented in this file.
 
 This changelog records changes to the Loom application and its public
