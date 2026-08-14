@@ -41,3 +41,9 @@ Participant context has stable projections at
 documents only; the owning participant's session additionally reveals private
 documents. All writes resolve ownership from the server-side session rather
 than a participant identifier supplied by the browser.
+
+For cheap, content-free discovery, the versioned JSON corpus manifest is at
+`/participants/{participant_id}/manifest.json`. It lists current document IDs,
+paths, types, versions, timestamps, and visibility without including document
+bodies. The owner sees all non-deleted documents; other and anonymous callers
+see only public documents.

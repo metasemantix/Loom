@@ -38,6 +38,39 @@ export async function listDocuments(env: Env, principal: Principal): Promise<Res
   return json({ documents: rows.results });
 }
 
+/**
+ * A compact, content-free inventory used to discover documents before fetching
+ * their bodies. Keep this projection explicit rather than returning database
+ * rows so additions to DocumentRow cannot accidentally expose document content.
+ */
+export async function manifest(env: Env, participantId: string, principal: Principal | null): Promise<Response> {
+  const participant = await env.DB.prepare(`SELECT p.id,u.display_name FROM participants p JOIN users u ON u.id=p.user_id WHERE p.id=? AND p.withdrawn_at IS NULL`)
+    .bind(participantId).first<{ id: string; display_name: string }>();
+  if (!participant) return problem(404, "not_found", "Participant not found");
+
+  const isOwner = principal?.participantId === participantId;
+  const rows = await env.DB.prepare(`${currentDocuments} AND (?=1 OR d.visibility='public') ORDER BY d.logical_path,d.id`)
+    .bind(participantId, isOwner ? 1 : 0).all<DocumentRow>();
+  const documents = rows.results.map((row) => ({
+    id: row.id,
+    logicalPath: row.logical_path,
+    title: row.title,
+    kind: row.kind,
+    contentType: row.content_type,
+    versionNumber: row.version_number,
+    updatedAt: row.updated_at,
+    visibility: row.visibility,
+    // Reserved for optional human- or system-supplied discovery metadata.
+    metadata: {},
+  }));
+
+  return json({
+    schemaVersion: 1,
+    participant: { id: participant.id, displayName: participant.display_name },
+    documents,
+  }, 200, { "cache-control": "no-store" });
+}
+
 export async function createDocument(request: Request, env: Env, principal: Principal): Promise<Response> {
   let body; try { body = await readJson(request); } catch (error) { return problem(400, "invalid_request", (error as Error).message); }
   const input = validate(body, true); if (typeof input === "string") return problem(400, "invalid_request", input);

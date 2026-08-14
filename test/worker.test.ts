@@ -108,6 +108,49 @@ describe("authorization and stable reads", () => {
     expect(markdown.headers.get("content-type")).toContain("text/markdown");
     expect(await markdown.text()).toContain("Document: doc_");
   });
+
+  it("provides a versioned content-free manifest with owner and public visibility", async () => {
+    const alice = await participant("alice"), bob = await participant("bob");
+    const privateId = await create(alice.cookie, "private");
+    const publicId = await create(alice.cookie, "public");
+
+    const anonymous = await SELF.fetch(`${origin}/participants/${alice.id}/manifest.json`);
+    expect(anonymous.status).toBe(200);
+    expect(anonymous.headers.get("cache-control")).toBe("no-store");
+    const publicManifest = await anonymous.json<{ schemaVersion: number; documents: Array<Record<string, unknown>> }>();
+    expect(publicManifest.schemaVersion).toBe(1);
+    expect(publicManifest.documents).toHaveLength(1);
+    expect(publicManifest.documents[0]).toMatchObject({ id: publicId, logicalPath: `documents/${publicId}`, title: "Notes", kind: "document", contentType: "text/markdown", versionNumber: 1, visibility: "public", metadata: {} });
+    expect(publicManifest.documents[0].updatedAt).toEqual(expect.any(String));
+    expect(publicManifest.documents[0]).not.toHaveProperty("content");
+    expect(JSON.stringify(publicManifest)).not.toContain("first");
+
+    const otherUser = await SELF.fetch(`${origin}/participants/${alice.id}/manifest.json`, { headers: { cookie: bob.cookie } });
+    expect((await otherUser.json<{ documents: Array<{ id: string }> }>()).documents.map((document) => document.id)).toEqual([publicId]);
+    const owner = await SELF.fetch(`${origin}/participants/${alice.id}/manifest.json`, { headers: { cookie: alice.cookie } });
+    expect((await owner.json<{ documents: Array<{ id: string; visibility: string }> }>()).documents.map((document) => [document.id, document.visibility])).toEqual(expect.arrayContaining([[privateId, "private"], [publicId, "public"]]));
+  });
+
+  it("reflects manifest creates, edits, and deletes dynamically", async () => {
+    const alice = await participant("alice");
+    const empty = await SELF.fetch(`${origin}/participants/${alice.id}/manifest.json`, { headers: { cookie: alice.cookie } });
+    expect((await empty.json<{ documents: unknown[] }>()).documents).toEqual([]);
+
+    const documentId = await create(alice.cookie, "public");
+    const created = await SELF.fetch(`${origin}/participants/${alice.id}/manifest.json`);
+    expect((await created.json<{ documents: Array<{ id: string; versionNumber: number; contentType: string }> }>()).documents).toMatchObject([{ id: documentId, versionNumber: 1, contentType: "text/markdown" }]);
+
+    const update = await SELF.fetch(`${origin}/api/me/documents/${documentId}`, { method: "PUT", headers: { cookie: alice.cookie, origin, "content-type": "application/json" }, body: JSON.stringify({ content: "replacement body", contentType: "text/plain" }) });
+    expect(update.status).toBe(200);
+    const edited = await SELF.fetch(`${origin}/participants/${alice.id}/manifest.json`);
+    const editedBody = await edited.json<{ documents: Array<{ versionNumber: number; contentType: string }> }>();
+    expect(editedBody.documents).toMatchObject([{ versionNumber: 2, contentType: "text/plain" }]);
+    expect(JSON.stringify(editedBody)).not.toContain("replacement body");
+
+    expect((await SELF.fetch(`${origin}/api/me/documents/${documentId}`, { method: "DELETE", headers: { cookie: alice.cookie, origin } })).status).toBe(204);
+    const deleted = await SELF.fetch(`${origin}/participants/${alice.id}/manifest.json`, { headers: { cookie: alice.cookie } });
+    expect((await deleted.json<{ documents: unknown[] }>()).documents).toEqual([]);
+  });
 });
 
 describe("portable participant export", () => {

@@ -1,5 +1,5 @@
 import { hashSecret, opaque, principalFor, sessionCookie } from "./auth";
-import { context, createDocument, deleteDocument, history, listDocuments, updateDocument } from "./documents";
+import { context, createDocument, deleteDocument, history, listDocuments, manifest, updateDocument } from "./documents";
 import { json, parseCookies, problem, requireSameOrigin } from "./http";
 import type { Env } from "./types";
 import { exportSpace } from "./export";
@@ -63,7 +63,9 @@ export default {
     if (request.method === "GET" && path === "/auth/discord") return discordStart(request, env);
     if (request.method === "GET" && path === "/auth/discord/callback") return discordCallback(request, env);
     const contextMatch = path.match(/^\/participants\/(par_[a-z0-9]+)\/context\.(json|md)$/);
+    const manifestMatch = path.match(/^\/participants\/(par_[a-z0-9]+)\/manifest\.json$/);
     const principal = await principalFor(request, env);
+    if (manifestMatch && request.method === "GET") return manifest(env, manifestMatch[1], principal);
     if (contextMatch && request.method === "GET") return context(request, env, contextMatch[1], contextMatch[2] as "json" | "md", principal);
     if (!principal) return request.method === "GET" && path === "/me" ? Response.redirect(`${url.origin}/login`, 302) : problem(401, "authentication_required", "Sign in is required");
     if (request.method === "GET" && path === "/me") return spacePage(principal.displayName, principal.participantId);
