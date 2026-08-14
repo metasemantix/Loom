@@ -28,27 +28,80 @@ For example, an agent could be permitted to add structured items to a shopping l
 
 The exact capability and permission protocol remains an architectural question for later design.
 
-## Corpus manifest
+## Ownership, organization, discovery, access, and capability are separate
 
-A user's corpus should expose a structured overview that allows humans and agents to discover what information exists without retrieving the entire corpus.
+Loom should model these as separate axes rather than encoding one in another.
 
-This manifest can function as a structured table of contents, containing document locations and concise information useful for deciding what should be retrieved.
+- Ownership determines who controls the source artifact and its deletion.
+- Folder/path structure is for human organization.
+- Project membership describes collaboration context.
+- Discovery surfaces describe which artifacts are advertised to a caller.
+- Read permissions determine which artifacts may actually be retrieved.
+- Write permissions and bounded capabilities determine which changes or operations an actor may perform.
 
-The earlier idea of a compact introduction medley can naturally extend into this corpus-wide discovery mechanism.
+A folder must not implicitly become a security boundary, manifest membership must not itself be treated as an access grant, and project inclusion must not imply arbitrary write authority.
+
+## Document visibility is mutable
+
+Visibility must not be frozen at document creation.
+
+Owners should be able to change an existing artifact's visibility, including ordinary public/private changes, without recreating the document. Changes to visibility should be reflected by relevant discovery surfaces and access checks.
+
+## Corpus manifests and discovery surfaces
+
+A corpus should expose structured overviews that allow humans and agents to discover what information exists without retrieving entire document bodies.
+
+There need not be one universal manifest. Loom may expose multiple named discovery surfaces, including a public manifest and manifests associated with individual projects or collaborations. A document may appear in zero, one, or several manifests.
+
+A manifest is a view over the corpus, not a second copy of the corpus and not an access-control list. Membership says that an artifact may be advertised through that discovery surface; the caller's permissions still determine whether it can be discovered or retrieved.
+
+Manifest projections should therefore be caller-aware and must not leak private artifact metadata to callers who lack discovery access.
+
+The earlier idea of a compact introduction medley can naturally extend into these structured tables of contents.
 
 ## AI-assisted manifest maintenance
 
-Loom may use AI to help maintain the corpus manifest as documents are created, changed, moved, or removed.
+Loom may use AI to help maintain discovery metadata and manifest membership as documents are created, changed, moved, or removed.
 
 AI assistance should maintain or propose descriptions, classifications, tags, or other discovery information rather than making the underlying corpus dependent on an AI-generated ontology.
 
-The manifest itself should remain inspectable and editable.
+Manifests and their metadata should remain inspectable and editable.
+
+## Projects are link corpora
+
+A project or collaboration should primarily reference participant-owned artifacts rather than storing duplicate project-owned copies of them.
+
+Explicitly adding a document to a project makes the source artifact part of that project's shared discovery corpus while ownership remains with the participant. Deleting the source removes its project presence rather than leaving a hidden duplicate behind.
+
+This preserves meaningful participant-controlled deletion while allowing agents to traverse shared project material.
+
+## Project access defaults
+
+Explicitly adding an artifact to a project should normally grant discovery and read access according to that project's access policy rather than requiring the owner to grant every project agent individually.
+
+Project-level defaults should carry most of the permission burden. Per-document exceptions may be added when real use cases require them rather than making fine-grained ACL management the default workflow.
+
+Read access and write authority remain separate. Inclusion in a project may grant read access without granting arbitrary editing rights.
+
+Projects may choose whether linked corpus material is directly readable by project members and their authorized agents or by authorized agents only.
+
+Whether agents that join a project later automatically inherit access to the existing project corpus should be an explicit project-level policy; automatic inheritance is a reasonable default.
+
+## Stable participant identity
+
+A participant's Loom identity should not depend on a mutable display name or external authentication provider.
+
+Display names may change while the underlying participant identity remains stable. A short, human-usable representation of that stable identity may be exposed for provenance and identity lookup, but should not be displayed everywhere as part of normal social presentation.
+
+Revision history and other provenance surfaces should remain capable of distinguishing historical actors even when an account is later removed. Deleted accounts should not collapse into one indistinguishable generic identity. A future deletion/anonymization policy may preserve a censored former display name together with the stable provenance identifier where appropriate.
 
 ## History and provenance
 
 Ordinary change history should provide the primary provenance mechanism rather than introducing a separate provenance subsystem.
 
 Where useful, revisions should record enough structured information to distinguish changes made by a human, an agent, an import, or Loom itself, and to identify a source artifact when a change is derived from another Loom artifact.
+
+Agent activity should likewise remain inspectable once agents can read, change, or invoke capabilities against participant data.
 
 ## Deletion semantics
 
@@ -59,6 +112,12 @@ Once information has been read, copied, summarized, transformed, or used to prod
 Loom should therefore avoid cascading deletion or other mechanisms that imply stronger revocation guarantees than the platform can actually provide.
 
 Permissions and sharing interfaces should make this limitation clear enough for users to make informed decisions before sharing.
+
+## Uploaded artifacts preserve their source
+
+Loom should support file upload rather than requiring all corpus material to be manually pasted into text fields.
+
+Where practical, an uploaded artifact should remain available in its original form. Text extraction, summaries, AI-readable projections, thumbnails, or other derived representations should not silently replace or destroy the source artifact.
 
 ## Content security and untrusted corpus data
 
@@ -73,6 +132,14 @@ Security scanning should report findings and support outcomes such as clean, sus
 Trusted agent instructions and capabilities should remain separate from retrieved corpus content. Security scanning is an additional defense and does not make arbitrary stored or shared content inherently trustworthy.
 
 The exact scanning pipeline, enforcement rules, and review process remain architectural questions for later design and may warrant a dedicated security document.
+
+## Direct messaging is not a prerequisite
+
+User-to-user direct messaging is not required for Loom's core coordination model.
+
+Adding general messaging would also introduce blocking, spam prevention, reporting, moderation, notification, retention, and unsolicited-contact policy. Contact requests and collaboration invitations may satisfy the immediate coordination need with substantially less platform machinery.
+
+Direct messaging can be reconsidered if concrete use cases require conversation to remain inside Loom.
 
 ## Changelog
 
