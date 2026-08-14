@@ -56,6 +56,8 @@ Near-term document management should grow beyond create/edit/delete to include:
 - project and discovery-surface membership;
 - portable export.
 
+When linking participant-owned documents into projects, replace manual document-ID entry in the normal UI with a human-readable picker/search over the participant's eligible documents. Keep the final Link action explicit and explain the resulting project read grant. Raw document-ID entry may remain available as an advanced/debugging mechanism rather than the primary workflow.
+
 Full-text search can follow when corpus size justifies it. Semantic search should not be introduced merely because an LLM is available.
 
 ## Project and collaboration lifecycle
@@ -76,6 +78,20 @@ Later project work needs to define:
 - behavior when a linked source artifact is removed, made private, or deleted.
 
 Project defaults should do most of the work rather than requiring per-agent permissions on every linked artifact.
+
+Human membership should move from direct owner-side insertion to invitation and acceptance. Useful invitation mechanics include:
+
+- revocable invite links;
+- single-use links as a sensible default, with reusable links available when a project needs them;
+- optional expiration such as 24 hours, 7 days, 30 days, or never;
+- a pending-invites view showing creation/use status and allowing revocation;
+- a project preview before acceptance containing enough context to make an informed choice (for example name, description, inviter/owner, member count, and read policy) without exposing the protected project corpus;
+- a single invite flow that works for existing Loom participants and logged-out/new participants: authenticate if necessary, return to the invitation, then explicitly choose Join;
+- explicit Leave project and Remove member actions whose access-revocation behavior follows the project membership semantics in `DECISIONS.md`.
+
+A future role selector may be added to invitations when Loom has more than one meaningful member role. Do not invent a large role system prematurely.
+
+For known Loom participants, provide a human-facing invitation flow using display-name search and/or the short stable lookup identifier for disambiguation. Selecting a participant should create an invitation, not immediately add them as a member. Full immutable participant IDs should remain available for provenance and advanced lookup without becoming routine UI input.
 
 ## Discovery surfaces and manifests
 
@@ -121,7 +137,7 @@ A functional activity inbox may eventually cover events such as:
 
 This should be operational notification infrastructure, not an engagement feed.
 
-A coherent onboarding path should eventually support invitation → authentication → participant identity → project membership → project discovery.
+A coherent onboarding path should support invitation → authentication if needed → project preview → explicit acceptance → participant identity/project membership → project discovery. Merely opening an invitation URL must not create membership.
 
 General direct messaging should remain deferred until Loom has a concrete reason to own the resulting spam, blocking, reporting, retention, and moderation problems. Lightweight contact requests or collaboration invitations may be enough.
 
@@ -130,6 +146,8 @@ General direct messaging should remain deferred until Loom has a concrete reason
 Revocable unlisted/tokenized read links may provide a useful middle ground between fully public documents and authenticated project membership.
 
 Any such mechanism must remain distinct from public visibility and project membership and should be revocable without changing the source artifact's ownership.
+
+Project invitation links are also capability-bearing URLs but have different semantics: they authorize a recipient to inspect an invitation and request/accept membership, not to read the project's protected corpus directly.
 
 ## Content security
 
