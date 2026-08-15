@@ -67,13 +67,30 @@ AI assistance should maintain or propose descriptions, classifications, tags, or
 
 Manifests and their metadata should remain inspectable and editable.
 
-## Projects are link corpora
+## Projects are link corpora and may own native artifacts
 
 A project or collaboration should primarily reference participant-owned artifacts rather than storing duplicate project-owned copies of them.
 
-Explicitly adding a document to a project makes the source artifact part of that project's shared discovery corpus while ownership remains with the participant. Deleting the source removes its project presence rather than leaving a hidden duplicate behind.
+Explicitly adding a participant-owned document to a project makes the source artifact part of that project's shared discovery corpus while ownership remains with the participant. Deleting the source removes its project presence rather than leaving a hidden duplicate behind.
 
-This preserves meaningful participant-controlled deletion while allowing agents to traverse shared project material.
+Projects may also own artifacts that are genuinely project-native: shared notes, decisions, specifications, generated manifests, meeting records, or other material intended to belong to the collaboration rather than to whichever participant happened to create it.
+
+Creation or upload should therefore be able to choose an ownership destination such as `My Space` or an eligible project. Project-owned artifacts have their own identity and revision history and do not become participant-owned merely because one participant created the first revision.
+
+Participant-owned and project-owned artifacts must remain distinguishable. Participant-owned material should remain the default unless project ownership is deliberately chosen.
+
+## Linking, copying, and ownership
+
+Linking and copying into a project have different semantics and should remain distinct operations.
+
+- **Link to project:** the participant retains ownership. The project receives the access defined by its policy, and removing the link or leaving the project withdraws future project access where possible.
+- **Copy to project:** Loom creates a new project-owned artifact with a new identity and its own revision history. The participant's original remains unchanged and independently owned.
+
+A project copy must preserve provenance pointing back to its source where applicable.
+
+Copying is an ownership-boundary event. The UI must clearly warn that once the project-owned copy is created, it is outside the original owner's sole control. Deleting, editing, making private, or otherwise changing the original does not revoke or alter the project copy.
+
+A dedicated ownership-transfer primitive is not required initially. A participant who wants the practical effect of transfer may deliberately copy an artifact into the project corpus and then separately decide whether to retain or delete their original.
 
 ## Project access defaults
 
@@ -95,6 +112,28 @@ Project membership should be established through an invitation that the recipien
 
 Leaving a project or being removed from it should withdraw future project access granted through that membership. Participant-owned documents previously linked by the departing member should cease to be shared through the project while remaining intact in the participant's own corpus.
 
+## Project administration and continuity
+
+A project has an owner and may have creator/owner-chosen administrators. How many administrators to appoint and whom to trust is a project governance choice rather than something Loom should infer automatically.
+
+The owner should be able to transfer ownership deliberately. Loom should not automatically promote an arbitrary member merely because the owner becomes unavailable.
+
+Administrators provide continuity for ongoing projects when the owner is absent and may perform explicitly defined project-management operations. Destructive authority such as project deletion should remain narrower than ordinary administration unless project policy later defines otherwise.
+
+Project-owned artifacts belong to the project rather than to its current owner or administrators. They therefore survive the disappearance, departure, or replacement of an individual project owner unless the project itself is deleted or archived according to project lifecycle policy.
+
+## Project deletion leaves a provenance shell
+
+Deleting a project should terminate the active collaboration without deleting participant-owned source artifacts.
+
+Deletion should revoke active project access, invalidate outstanding invitations, remove project-document links, and remove project-owned document bodies according to the project's deletion policy.
+
+Loom should retain a minimal historical project record — a "white dwarf" rather than a functioning project — so historical provenance does not collapse into an unresolvable identifier. This record may retain the stable project identity, former name, creation/deletion timestamps, and former membership/role information sufficient to understand historical references.
+
+The retained shell must not remain a usable collaboration space, confer permissions, or preserve document bodies merely for convenience.
+
+Archiving is distinct from deletion: an archived project may remain intentionally readable and inspectable while becoming inactive/read-only, whereas a deleted project leaves only the minimal provenance shell.
+
 ## Intentional sharing should not require manual identifiers
 
 Loom should preserve explicit user intent at consequential sharing boundaries without requiring humans to manipulate internal database identifiers as the normal interface.
@@ -102,6 +141,14 @@ Loom should preserve explicit user intent at consequential sharing boundaries wi
 Linking a document to a project should remain an explicit action, but the ordinary UI should present a human-readable document picker rather than requiring a pasted document ID. The confirmation or action that grants project access is the meaningful consent boundary.
 
 Similarly, stable participant IDs and short lookup identifiers are useful for provenance and unambiguous lookup, but should not be the primary mechanism for routine human interaction. Human-facing participant discovery should prefer names/search plus explicit confirmation or invitation, while retaining IDs as an advanced or disambiguating mechanism.
+
+## Preflight review before irreversible sharing
+
+Before creating a project-owned copy from participant-owned material, Loom should provide a strong confirmation that explains the loss of sole control and the independence of the resulting copy.
+
+Loom may additionally offer a preflight review for likely accidental oversharing. Deterministic checks should handle recognizable secrets, credentials, dangerous markup, and similar patterns where practical. AI-assisted review may flag semantically sensitive or unexpectedly unrelated passages that deterministic checks cannot reliably identify.
+
+Such review should be advisory by default: surface specific findings for the participant to inspect and allow an informed decision rather than silently rewriting content or making opaque ownership decisions on the participant's behalf. Security policy may separately block material that is unsafe for the platform itself.
 
 ## Stable participant identity
 
