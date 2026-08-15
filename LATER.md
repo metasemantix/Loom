@@ -1,201 +1,238 @@
-# Later
+# Road to a Respectable MVP
 
-Things worth preserving without expanding the current MVP.
+Loom has moved beyond the original infrastructure vertical slice. Sign-in, participant-owned documents, revision and metadata history, upload, export, mutable visibility, Loom-native identity, logical paths, and the first project/link-corpus model already exist.
 
-## Codex implementation handoff
+This document therefore describes the **visible road from the current implementation to a respectable MVP**: something coherent enough to use for a small real collaboration without exposing internal IDs as normal UX, losing project continuity, or requiring the future agent architecture to be solved first.
 
-When it is time to turn the infrastructure MVP into running code, hand Codex the repository with this instruction:
+It is intentionally near-horizon. Longer-term architecture belongs in `VISION.md` and `DECISIONS.md`; ideas that do not need to be on the MVP path should not accumulate here merely because they are interesting.
 
-> Implement the smallest working vertical slice described in `docs/infrastructure-mvp.md`. Prefer boring Cloudflare-native primitives. Do not expand scope. When the spec leaves a choice open, choose the simplest reversible option and document it.
+## MVP target
 
-The first vertical slice should proceed in this order:
+A respectable MVP should let a participant:
 
-1. sign in;
-2. create and edit one's own participant space;
-3. persist documents in the database with deletable revision history;
-4. expose the permitted data through stable Markdown/JSON representations;
-5. create/revoke a scoped agent credential;
-6. permit that agent to perform one bounded write inside its authorized area;
-7. create an experiment;
-8. expose an experiment corpus for agent retrieval.
+- sign in and maintain a portable personal corpus;
+- create, upload, organize, edit, inspect history for, export, and delete their artifacts;
+- distinguish private and public material;
+- create or join a project through an explicit consensual flow;
+- deliberately link participant-owned material into a project without surrendering ownership;
+- deliberately create or copy material into a project-owned corpus when collective ownership is intended;
+- understand who administers a project and what happens if its creator disappears;
+- leave or remove a participant without leaving their participant-owned project grants behind;
+- archive or delete a project with intelligible lifecycle semantics;
+- use human-readable pickers and invitations rather than copying internal database IDs;
+- expose stable, permission-aware discovery surfaces suitable for later agent retrieval;
+- rely on basic security and provenance boundaries before agents routinely ingest shared material.
 
-Implementation choices that may be made pragmatically rather than designed in advance include:
+Backend AI, autonomous coordination, semantic memory, matching, direct messaging, and a rich agent-control system are **not prerequisites** for this milestone.
 
-- exact authentication provider/mechanism;
-- database schema details;
-- session handling;
-- route names;
-- frontend framework and component structure.
+## 1. Make projects human-usable
 
-Choose the simplest reversible option that satisfies the infrastructure contract. These choices must not introduce backend AI, semantic memory, matching, autonomous coordination, a social feed, or other features outside the infrastructure MVP.
+The current project model proves the relational semantics but still exposes implementation details as UX.
 
-## Human-facing product surfaces
+### Document picker
 
-As Loom grows beyond the first vertical slice, avoid turning My Space into one screen containing every control.
+Replace normal manual document-ID entry with a picker/search over the participant's eligible documents.
 
-Likely surfaces include:
+The final **Link to project** action remains explicit and should state that the project's read audience receives access while ownership and write control remain with the participant.
 
-- **Profile** — lightweight participant identity and public-facing entry points. Rich self-description can remain ordinary corpus documents rather than becoming a rigid profile schema.
-- **Documents** — browse/search, folders and paths, visibility, project/manifest membership, revision history, move/rename/delete, and export.
-- **Create / Upload** — create Markdown, text, or structured artifacts and upload existing files without manual pasting. Creation should eventually offer an explicit destination/owner selector such as `My Space` or an eligible project.
-- **Projects / Collaborations** — membership, invitations, linked and project-owned corpus, manifests/discovery surfaces, access defaults, roles, and lifecycle controls.
-- **Agents** — connected or authorized agents, discovery/read/write grants, bounded capabilities, and revocation.
-- **Control Room** — display name, stable identity/lookup information, connected authentication providers, export, account deletion/withdrawal, security information, and global defaults.
+Raw document-ID entry may remain as an advanced/debugging path.
 
-These are conceptual areas rather than a commitment to a particular navigation structure.
+### Consensual invitations
 
-## Document administration
+Replace direct owner-side member insertion with invitation and acceptance.
 
-Near-term document management should grow beyond create/edit/delete to include:
+Minimum useful flow:
 
-- changing public/private visibility after creation;
-- freeform folder/path organization independent of permissions;
-- moving and renaming artifacts;
-- title/path search;
-- file upload while preserving original source artifacts;
-- project and discovery-surface membership;
-- portable export.
+1. an authorized project administrator creates an invitation;
+2. Loom produces a revocable tokenized URL;
+3. the recipient opens a project preview;
+4. if necessary, they authenticate and return to the same invitation;
+5. they explicitly choose **Join** or decline;
+6. only acceptance creates project membership.
 
-When linking participant-owned documents into projects, replace manual document-ID entry in the normal UI with a human-readable picker/search over the participant's eligible documents. Keep the final Link action explicit and explain the resulting project read grant. Raw document-ID entry may remain available as an advanced/debugging mechanism rather than the primary workflow.
+Opening an invitation URL must never itself create membership.
 
-For creation and upload, provide an ownership destination such as `My Space` or a project in which the participant has permission to create project-owned artifacts. Choosing a project creates a project-owned artifact from the outset; choosing My Space creates a participant-owned artifact that can later be linked or deliberately copied into projects.
+For the MVP, single-use invitations with a sensible default expiry are sufficient. The project should expose outstanding invitations and allow them to be revoked. Reusable/public invitation links can wait until a real use case requires them.
 
-A future `Copy to project` action should create a new project-owned artifact rather than mutating ownership of the source. The confirmation should state prominently that the project copy is outside the original owner's sole control and will not disappear when the source is deleted. Preserve source provenance on the new artifact.
+The preview should show enough context for an informed decision without exposing the protected corpus: project name and description, inviter/owner, read policy, and basic membership context.
 
-Full-text search can follow when corpus size justifies it. Semantic search should not be introduced merely because an LLM is available.
+### Membership controls
 
-## Project and collaboration lifecycle
+Provide explicit **Leave project** and authorized **Remove member** actions.
 
-Projects should develop as shared link corpora over participant-owned artifacts while also supporting genuinely project-owned collaborative artifacts.
+Existing semantics must remain intact: withdrawing membership removes that participant's participant-owned project links while leaving their source artifacts untouched.
 
-Near-term project work should include:
+## 2. Give projects a real lifecycle
 
-- project description;
-- owner-chosen administrators;
-- explicit owner transfer;
-- project deletion;
-- eventual archive/read-only state distinct from deletion;
-- creation and invitations;
-- membership and removal;
-- project-level discovery/read defaults;
-- whether human members may directly browse linked material or access is agent-only;
-- whether newly authorized agents inherit access to the existing corpus;
-- explicit collaborative-write grants where needed;
-- behavior when a linked source artifact is removed, made private, or deleted.
+### Project description
 
-Project defaults should do most of the work rather than requiring per-agent permissions on every linked artifact.
+Projects need a small human-readable description independent of their document corpus so invitations and project lists are intelligible.
 
-Project deletion should remove the active collaboration, invitations, access grants, references, and project-owned content while leaving participant-owned source documents alone. Preserve only the minimal historical project/membership shell needed for provenance. Archive should remain a separate lifecycle operation for intentionally retained, inactive/read-only projects.
+### Owner and creator-chosen administrators
 
-Human membership should move from direct owner-side insertion to invitation and acceptance. Useful invitation mechanics include:
+Projects have an owner and may have owner-chosen administrators.
 
-- revocable invite links;
-- single-use links as a sensible default, with reusable links available when a project needs them;
-- optional expiration such as 24 hours, 7 days, 30 days, or never;
-- a pending-invites view showing creation/use status and allowing revocation;
-- a project preview before acceptance containing enough context to make an informed choice (for example name, description, inviter/owner, member count, and read policy) without exposing the protected project corpus;
-- a single invite flow that works for existing Loom participants and logged-out/new participants: authenticate if necessary, return to the invitation, then explicitly choose Join;
-- explicit Leave project and Remove member actions whose access-revocation behavior follows the project membership semantics in `DECISIONS.md`.
+The owner chooses whom to trust; Loom should not infer or automatically promote a successor. Administrators provide continuity and receive only explicitly defined administrative capabilities.
 
-A future role selector may be added to invitations when Loom has more than one meaningful member role. Do not invent a large role system prematurely. Initially, creator/owner-chosen `admin` plus ordinary `member` is sufficient. Admin permissions should be explicitly enumerated rather than assumed to equal ownership; project deletion should initially remain owner-only.
+Support deliberate ownership transfer. The current owner should not be able to leave an active project without first transferring ownership or resolving the project's lifecycle.
 
-For known Loom participants, provide a human-facing invitation flow using display-name search and/or the short stable lookup identifier for disambiguation. Selecting a participant should create an invitation, not immediately add them as a member. Full immutable participant IDs should remain available for provenance and advanced lookup without becoming routine UI input.
+Project deletion should initially remain owner-only unless a later governance model deliberately changes that rule.
 
-## Project-owned artifacts
+### Archive
 
-Project-owned artifacts should exist for material intended to belong to the collaboration itself rather than arbitrarily to the participant who first created it.
+Support an inactive/read-only archived state for completed projects whose corpus and provenance should remain intentionally inspectable.
 
-Useful examples include shared notes, decisions, specifications, meeting records, and project-maintained manifests.
+Archiving is reversible if practical and must not be confused with deletion.
 
-Creation/upload should make ownership explicit. Do not infer ownership merely from which screen the participant happens to be viewing.
+### Delete and retain the white dwarf
 
-Participant → project copying should:
+Project deletion terminates the active collaboration.
 
-1. show the destination project and its relevant governance/access context;
-2. warn that a new independent project-owned artifact will be created outside the participant's sole control;
-3. make clear that deleting or changing the original will not revoke the project copy;
-4. optionally run a preflight oversharing/security review;
-5. create a new artifact identity and independent revision history;
-6. record provenance back to the source artifact.
+It should:
 
-Do not implement a generic ownership-transfer operation until a concrete need justifies its additional governance semantics. Copy plus an independent decision about the original is sufficient initially.
+- invalidate invitations;
+- revoke active project-derived access;
+- remove participant-document project links without touching participant-owned source artifacts;
+- remove project-owned document bodies according to the deletion policy;
+- disable the project as a collaboration space.
 
-Project-owned documents should survive changes in the project's human owner because the project, not that individual, owns them.
+Retain only a minimal historical provenance shell: stable project ID, former name, creation/deletion timestamps, and former member/role information sufficient to resolve historical references. The shell confers no permissions and contains no project document bodies.
 
-## Preflight sharing review
+## 3. Add project-owned artifacts
 
-Consequential sharing operations, especially creation of independent project-owned copies, may offer a preflight review before final confirmation.
+The current project corpus consists of references to participant-owned material. The MVP should additionally support genuinely project-native artifacts.
 
-Use deterministic checks first for recognizable secrets, credentials, suspicious markup/code, encoded payloads, and similar mechanically detectable hazards. Optional Loom AI may add semantic review for likely accidental disclosure, unexpectedly sensitive passages, material that appears unrelated to the destination project, or other context-dependent concerns.
+### Ownership destination at creation/upload
 
-The review should point to concrete findings and let the participant inspect them. It should normally be advisory, with an explicit `Copy anyway` path, rather than silently editing the source or substituting AI judgment for the participant's decision. Platform-level security rules may separately block genuinely unsafe payloads.
+Creation and upload should offer an explicit destination such as:
 
-## Discovery surfaces and manifests
+```text
+Create in:
+- My Space
+- Project Gloom
+- Project Loom
+```
 
-The first deterministic manifest can remain simple, but the longer-term model may include multiple named discovery surfaces rather than one universal corpus index.
+Only projects in which the participant has permission to create project-owned artifacts should appear.
 
-Likely examples include a public manifest and one manifest for each project or collaboration. Documents may participate in several discovery surfaces while remaining stored and owned only once.
+Choosing a project creates a project-owned artifact from birth. Choosing My Space creates a participant-owned artifact. Folder/path movement does not change ownership.
 
-Future manifest work may add editable descriptions, tags, classifications, or other compact retrieval hints. AI may propose or maintain these fields and suggest manifest membership, but the structures must remain inspectable, portable, and non-authoritative.
+### Project-owned document behavior
 
-Manifest retrieval should remain cheap: discovery queries should not load full document bodies merely to discard them.
+Project-owned artifacts:
 
-## Agent permissions and activity
+- have stable document identities and revision histories;
+- belong to the project, not to the participant who created the first revision;
+- survive departure or disappearance of an individual owner/admin while the project remains active;
+- follow explicit project write/edit policy rather than participant ownership rules;
+- participate in project export and discovery surfaces.
 
-Agent access should eventually distinguish discovery, read, arbitrary write, and bounded operations.
+Keep the initial write policy simple. A small owner/admin/member distinction is preferable to a general ACL system.
 
-Useful future controls include:
+### Copy to project
 
-- project-derived read grants;
-- explicit write grants;
-- bounded capabilities such as adding structured items without rewriting an entire artifact;
-- revocation;
-- an activity/audit view showing which agent read or changed an artifact or invoked a capability.
+Allow a participant-owned artifact to be deliberately copied into a project corpus.
 
-Trusted agent instructions and capability definitions must remain separate from retrieved corpus content.
+Copying must:
 
-## Identity and control room
+- create a new project-owned artifact with a new identity;
+- leave the original unchanged;
+- preserve provenance pointing to the source artifact;
+- start an independent revision history;
+- clearly warn that the project copy is outside the original owner's sole control and will not disappear if the original is later changed or deleted.
 
-Participants need a Loom-native identity layer independent of Discord or any other login provider.
+Do not add a separate ownership-transfer primitive for the MVP. Copying plus an independent decision about the original covers the immediate need with clearer semantics.
 
-Future work should include editable display names and a stable participant identity that does not change when the display name or authentication provider changes. A compact identity representation may be useful specifically for provenance and lookup.
+## 4. Basic preflight and content-security boundary
 
-Account deletion/anonymization needs a policy for preserving intelligible historical provenance without retaining more identity information than intended. In particular, different deleted actors should not collapse into one indistinguishable generic identity.
+Before project-owned copies make irreversible sharing easy, add a modest preflight layer.
 
-## Invitations, notifications, and contact
+### Deterministic checks first
 
-A functional activity inbox may eventually cover events such as:
+Check for obvious accidental or dangerous material where practical, including:
 
-- project invitations;
-- accepted or declined invitations;
-- access or capability requests;
-- relevant shared-document changes;
-- agent authorization events.
+- common secret/API-key patterns;
+- credentials;
+- executable/script or dangerous markup where inappropriate;
+- malformed or suspicious encoded payloads;
+- other inexpensive high-confidence checks.
 
-This should be operational notification infrastructure, not an engagement feed.
+Findings should be specific and reviewable. Do not silently rewrite source content.
 
-A coherent onboarding path should support invitation → authentication if needed → project preview → explicit acceptance → participant identity/project membership → project discovery. Merely opening an invitation URL must not create membership.
+### Optional AI-assisted review
 
-General direct messaging should remain deferred until Loom has a concrete reason to own the resulting spam, blocking, reporting, retention, and moderation problems. Lightweight contact requests or collaboration invitations may be enough.
+An AI-assisted preflight may flag semantic oversharing that deterministic rules cannot identify well: unexpectedly sensitive passages, material apparently unrelated to the destination project, or suspicious instruction/prompt-injection content.
 
-## Sharing links
+For ordinary participant-controlled sharing, this should be advisory by default: show what was flagged and allow the participant to review and deliberately continue. Platform-level unsafe content may be governed separately.
 
-Revocable unlisted/tokenized read links may provide a useful middle ground between fully public documents and authenticated project membership.
+The MVP must not depend on AI being available for ordinary storage, linking, or project operation.
 
-Any such mechanism must remain distinct from public visibility and project membership and should be revocable without changing the source artifact's ownership.
+## 5. Discovery surfaces / manifold manifests
 
-Project invitation links are also capability-bearing URLs but have different semantics: they authorize a recipient to inspect an invitation and request/accept membership, not to read the project's protected corpus directly.
+Once projects and ownership destinations are stable, implement manifests as projections over the existing corpus rather than as a second storage system.
 
-## Content security
+At minimum, Loom needs cheap structured discovery for:
 
-Before agents routinely ingest arbitrary uploaded or shared material, Loom should develop a content-security pipeline.
+- the participant/owner view;
+- public material;
+- each project/collaboration corpus.
 
-Likely layers include deterministic checks for dangerous markup, executable/script content, suspicious encodings, secret patterns, and malformed metadata, with optional AI-assisted semantic checks for prompt injection, retrieval poisoning, tool-use bait, or attempted context exfiltration.
+A document may appear in several discovery surfaces without being duplicated. Manifest visibility must be caller-aware: metadata about inaccessible artifacts must not leak merely because the artifact belongs to a manifest.
 
-Findings should be visible and reviewable rather than silently rewriting source artifacts.
+Keep the first representation deterministic and inspectable: IDs, titles, kinds, paths, ownership/provenance, compact descriptions where available, and retrieval references. Retrieval of the manifest must not load every full document body.
 
-## Deferred intelligence
+AI-assisted manifest upkeep may later propose descriptions, tags, classifications, or membership, but the manifest structure itself must work without AI and remain editable/portable.
 
-Loom's core backend does not require an LLM. AI belongs at the edges through participating agents. Optional future AI-derived indexing, tagging, summarization, relation extraction, manifest maintenance, coordination, or preflight sharing review should remain non-authoritative unless explicitly accepted through a permissioned workflow.
+## 6. Agent-ready retrieval boundary
 
-THREAD or another semantic/relation layer remains a later concern. Do not block the first running Loom implementation on it.
+The respectable MVP does not need autonomous agents, but it should stop just short of requiring architectural surgery when they arrive.
+
+Define a stable read-oriented protocol through which an authorized caller can:
+
+- identify itself;
+- retrieve the discovery surface it is permitted to see;
+- fetch permitted artifacts by stable reference;
+- distinguish participant-owned from project-owned material;
+- observe provenance and relevant revision metadata;
+- receive no hidden/private metadata outside its grants.
+
+Do not implement arbitrary agent write access merely to complete this section. Bounded write capabilities, explicit agent credentials, activity logs, and richer authorization can follow once the retrieval model has been exercised by a real client.
+
+Retrieved corpus content remains untrusted data, not trusted agent instruction.
+
+## 7. MVP hardening
+
+Before calling the milestone respectable, exercise it as an existing installation rather than only as a fresh test database.
+
+Required hardening includes:
+
+- migration testing against populated prior schema versions;
+- functional browser smoke tests for the main human paths;
+- syntax validation for generated/inline browser JavaScript;
+- positive and negative authorization tests;
+- export round-trip checks sufficient to establish that archives are readable and contain current artifacts/history;
+- deletion tests proving participant-owned source data is not accidentally destroyed by project lifecycle operations;
+- XSS/injection regression coverage for user-controlled presentation data;
+- clear error states for failed uploads, invitations, mutations, and migrations;
+- review of limits for upload size, project size, invitation lifetime, and obvious abuse cases.
+
+`AGENTS.md` defines the minimum operating discipline for coding agents working on these surfaces.
+
+## Explicitly beyond this MVP
+
+Unless implementation reveals a hard dependency, defer:
+
+- general direct messaging;
+- social feeds/following;
+- reputation or compatibility scoring;
+- semantic search;
+- autonomous matching or coordination;
+- automatic project-governance decisions;
+- elaborate custom role systems;
+- per-document × per-member ACL matrices;
+- arbitrary agent write access;
+- self-modifying production infrastructure;
+- a universal ontology;
+- THREAD/relation-layer integration.
+
+These may become useful later. They should not prevent Loom from first becoming a small, coherent, portable environment in which humans can own a corpus, deliberately share it, collaborate around project-owned and participant-owned artifacts, and expose those structures safely enough for agents to begin reading them.
