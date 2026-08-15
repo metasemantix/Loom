@@ -41,8 +41,15 @@ async function zipFiles(response: Response): Promise<Map<string, string>> {
 }
 
 beforeEach(async () => {
-  await env.DB.exec("DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
+  await env.DB.exec("DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
 });
+
+async function invite(projectId:string, inviter:{cookie:string}, recipient:{cookie:string}) {
+  const created=await SELF.fetch(`${origin}/api/projects/${projectId}/invitations`,{method:"POST",headers:{cookie:inviter.cookie,origin}});
+  expect(created.status).toBe(201);const token=(await created.json<{invitation:{token:string}}>()).invitation.token;
+  const accepted=await SELF.fetch(`${origin}/api/invitations/${token}`,{method:"POST",headers:{cookie:recipient.cookie,origin}});expect(accepted.status).toBe(201);
+  return token;
+}
 
 describe("document metadata and uploads", () => {
   it("lets only the owner change visibility, title, and path and records a distinct event", async () => {
@@ -108,10 +115,46 @@ describe("Control Room identity", () => {
 });
 
 describe("project link corpora", () => {
+  it("describes projects and exposes only the authenticated member's eligible link choices", async () => {
+    const alice=await participant("alice"),bob=await participant("bob"),mine=await create(alice.cookie),theirs=await create(bob.cookie);
+    const response=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Readable",description:"A concise purpose",readAudience:"members_and_agents"})});
+    const projectId=(await response.json<{project:{id:string}}>()).project.id;await invite(projectId,alice,bob);
+    let view=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(view.project.description).toBe("A concise purpose");expect(view.eligibleDocuments.map((d:any)=>d.id)).toEqual([mine]);
+    expect((await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId:theirs})})).status).toBe(404);
+    await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId:mine})});
+    view=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(view.eligibleDocuments).toEqual([]);
+    expect((await SELF.fetch(`${origin}/api/projects/${projectId}`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({description:"no"})})).status).toBe(403);
+  });
+
+  it("uses explicit, single-use invitations whose previews reveal no corpus", async () => {
+    const alice=await participant("alice"),bob=await participant("bob"),carol=await participant("carol"),documentId=await create(alice.cookie);
+    const created=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Invite me",description:"Preview purpose",readAudience:"members_and_agents"})});const id=(await created.json<any>()).project.id;
+    await SELF.fetch(`${origin}/api/projects/${id}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})});
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/invitations`,{method:"POST",headers:{cookie:bob.cookie,origin}})).status).toBe(404);
+    const made=await SELF.fetch(`${origin}/api/projects/${id}/invitations`,{method:"POST",headers:{cookie:alice.cookie,origin}}).then(r=>r.json<any>());const token=made.invitation.token;
+    const preview=await SELF.fetch(`${origin}/api/invitations/${token}`).then(r=>r.json<any>());expect(preview.invitation).toMatchObject({projectName:"Invite me",projectDescription:"Preview purpose",active:true,memberCount:1});expect(JSON.stringify(preview)).not.toContain("first");
+    expect((await env.DB.prepare(`SELECT count(*) count FROM project_members WHERE project_id=?`).bind(id).first<any>()).count).toBe(1);
+    expect((await SELF.fetch(`${origin}/api/invitations/${token}`,{method:"POST",headers:{cookie:bob.cookie,origin}})).status).toBe(201);expect((await SELF.fetch(`${origin}/api/invitations/${token}`,{method:"POST",headers:{cookie:carol.cookie,origin}})).status).toBe(410);
+    const declined=(await SELF.fetch(`${origin}/api/projects/${id}/invitations`,{method:"POST",headers:{cookie:alice.cookie,origin}}).then(r=>r.json<any>())).invitation.token;expect((await SELF.fetch(`${origin}/api/invitations/${declined}/decline`,{method:"POST",headers:{cookie:carol.cookie,origin}})).status).toBe(204);expect((await SELF.fetch(`${origin}/api/projects/${id}`,{headers:{cookie:carol.cookie}})).status).toBe(404);
+    const revoked=await SELF.fetch(`${origin}/api/projects/${id}/invitations`,{method:"POST",headers:{cookie:alice.cookie,origin}}).then(r=>r.json<any>());await SELF.fetch(`${origin}/api/projects/${id}/invitations/${revoked.invitation.id}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}});expect((await SELF.fetch(`${origin}/api/invitations/${revoked.invitation.token}`,{method:"POST",headers:{cookie:carol.cookie,origin}})).status).toBe(410);
+    const expired=await SELF.fetch(`${origin}/api/projects/${id}/invitations`,{method:"POST",headers:{cookie:alice.cookie,origin}}).then(r=>r.json<any>());await env.DB.prepare(`UPDATE project_invitations SET expires_at=? WHERE id=?`).bind("2000-01-01T00:00:00.000Z",expired.invitation.id).run();expect((await SELF.fetch(`${origin}/api/invitations/${expired.invitation.token}`,{method:"POST",headers:{cookie:carol.cookie,origin}})).status).toBe(410);
+  });
+
+  it("enforces admin boundaries, transfers ownership, and cleans links on departure", async () => {
+    const alice=await participant("alice"),bob=await participant("bob"),carol=await participant("carol"),bobDoc=await create(bob.cookie);const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Roles",readAudience:"members_and_agents"})}).then(r=>r.json<any>());const id=made.project.id;await invite(id,alice,bob);await invite(id,alice,carol);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/members/${bob.id}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({role:"admin"})})).status).toBe(200);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/members/${alice.id}`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({role:"member"})})).status).toBe(403);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/members/${alice.id}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}})).status).toBe(409);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/ownership`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({participantId:bob.id,confirm:true})})).status).toBe(200);
+    const roles=await env.DB.prepare(`SELECT participant_id,role FROM project_members WHERE project_id=? ORDER BY participant_id`).bind(id).all<any>();expect(roles.results).toContainEqual({participant_id:alice.id,role:"admin"});expect(roles.results.filter((m:any)=>m.role==="owner")).toEqual([{participant_id:bob.id,role:"owner"}]);
+    await SELF.fetch(`${origin}/api/projects/${id}/documents`,{method:"POST",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId:bobDoc})});
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/members/${alice.id}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}})).status).toBe(204);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/members/${carol.id}`,{method:"DELETE",headers:{cookie:bob.cookie,origin}})).status).toBe(204);expect(await env.DB.prepare(`SELECT id FROM documents WHERE id=?`).bind(bobDoc).first()).toBeTruthy();
+  });
   it("supports membership and policy reads without transferring document authority", async () => {
     const alice=await participant("alice"),bob=await participant("bob"),documentId=await create(alice.cookie,"private");
     const created=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Shared",readAudience:"members_and_agents"})});expect(created.status).toBe(201);const projectId=(await created.json<{project:{id:string}}>()).project.id;
-    expect((await SELF.fetch(`${origin}/api/projects/${projectId}/members`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({participantId:bob.id})})).status).toBe(201);
+    await invite(projectId,alice,bob);
     expect((await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})})).status).toBe(201);
     const view=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<{documents:Array<{id:string;owner_participant_id:string}>}>());expect(view.documents[0]).toMatchObject({id:documentId,owner_participant_id:alice.id});
     expect((await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"DELETE",headers:{cookie:bob.cookie,origin}})).status).toBe(404);
@@ -128,7 +171,7 @@ describe("project link corpora", () => {
     const alice=await participant("alice"),bob=await participant("bob"),carol=await participant("carol"),bobDocument=await create(bob.cookie,"private"),carolDocument=await create(carol.cookie,"private");
     const created=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Shared",readAudience:"members_and_agents"})});
     const projectId=(await created.json<{project:{id:string}}>()).project.id;
-    for(const member of [bob,carol]) expect((await SELF.fetch(`${origin}/api/projects/${projectId}/members`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({participantId:member.id})})).status).toBe(201);
+    for(const member of [bob,carol]) await invite(projectId,alice,member);
     for(const [member,documentId] of [[bob,bobDocument],[carol,carolDocument]] as const) expect((await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:member.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})})).status).toBe(201);
 
     expect((await SELF.fetch(`${origin}/api/projects/${projectId}/members/${bob.id}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}})).status).toBe(204);
@@ -250,6 +293,10 @@ describe("portable participant export", () => {
 });
 
 describe("browser UI", () => {
+  it("emits syntactically valid browser JavaScript for project and invitation pages", async () => {
+    const alice=await participant("alice");
+    for(const path of ["/projects","/invitations/inv_example"]){const html=await SELF.fetch(origin+path,{headers:{cookie:alice.cookie}}).then(r=>r.text());const scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match=>match[1]);expect(scripts.length).toBeGreaterThan(0);for(const script of scripts)expect(()=>new Function(script)).not.toThrow()}
+  });
   it("exposes document metadata and the existing edit, history, and confirmed-delete capabilities", async () => {
     const alice = await participant("alice");
     const response = await SELF.fetch(`${origin}/me`, { headers: { cookie: alice.cookie } });
@@ -279,7 +326,7 @@ describe("browser UI", () => {
     const controlRoomHtml = await SELF.fetch(`${origin}/control-room`, { headers: { cookie: alice.cookie } }).then((response) => response.text());
     expect(projectsHtml).not.toContain("innerHTML");
     expect(controlRoomHtml).not.toContain("innerHTML");
-    expect(projectsHtml).toContain("node.textContent=textValue");
+    expect(projectsHtml).toContain("n.textContent=text");
     expect(controlRoomHtml).toContain("content.textContent=value");
     expect(projectsHtml).not.toContain(dangerous);
     expect(controlRoomHtml).not.toContain(dangerous);

@@ -19,6 +19,9 @@ data and are not recorded here.
 
 ### Added
 
+- Added human-usable projects with descriptions, document pickers, consensual
+  expiring invitations, owner-selected administrators, ownership transfer, and
+  safe leave/removal controls.
 - Discord sign-in backed by stable Loom user and participant identities.
 - Participant-owned Markdown, JSON, and plain-text documents with public or
   private visibility.

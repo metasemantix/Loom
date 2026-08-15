@@ -58,8 +58,12 @@ explicit metadata events returned alongside content revisions by
 `GET /api/me/documents/{id}/versions`. Logical paths are organizational only
 and must be unique within a participant's corpus.
 
-Projects are available under `/api/projects`. A project stores memberships and
-references to source documents; references use database foreign keys with
+Projects are available under `/api/projects`. Projects have a plain-text
+description and owner/admin/member roles. Seven-day, single-use invitation URLs
+use hashed bearer tokens and require an explicit accept or decline; creating or
+previewing an invitation never creates membership. A project stores memberships and
+references to source documents; the human UI offers only the signed-in participant's
+eligible documents in a title/path picker. References use database foreign keys with
 cascade deletion, so removing a link never deletes its source while deleting a
 source cannot leave a hidden copy. `members_and_agents` exposes linked content
 in authenticated member project views. `agents_only` suppresses linked content
@@ -67,3 +71,9 @@ from human project views while retaining the policy and references for a future
 authorized-agent layer. Neither mode grants members write or delete authority
 over another participant's source document. All mutation routes require an
 authenticated session and a matching `Origin` header.
+
+Owners can appoint administrators and deliberately transfer ownership to an
+existing member, remaining an administrator afterward. Members and
+administrators can leave; administrators can remove ordinary members, while
+only owners can remove administrators. Departure removes only the departing
+participant's project links and never their source documents.
