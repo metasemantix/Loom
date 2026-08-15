@@ -8,6 +8,10 @@ This file contains operating rules for coding agents working on Loom.
 - Extend existing concepts where possible. Do not invent parallel abstractions because they are locally convenient.
 - Keep scope bounded to the requested change. If a nearby architectural question is unresolved, report it rather than silently deciding it.
 
+## Preserve user-visible behavior during refactors
+
+Preserve existing user-visible capabilities and established semantics unless their removal or replacement is explicitly required by the task or documented project decisions. Moving or simplifying a UI capability is fine; silently dropping it is not. Before completing a refactor, compare the affected pre-change and post-change surfaces for lost actions, information, authorization behavior, and provenance/history detail.
+
 ## Preserve Loom's core semantics
 
 - Participant ownership is authoritative.

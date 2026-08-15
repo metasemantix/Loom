@@ -313,6 +313,23 @@ describe("browser UI", () => {
     expect(html).not.toContain("d.content");expect(html).not.toContain('href="/api/me/export"');
     const detail=await SELF.fetch(`${origin}/documents/${id}`,{headers:{cookie:alice.cookie}}).then(r=>r.text());
     expect(detail).toContain("Edit content");expect(detail).toContain("Revision history");expect(detail).toContain("This cannot be undone.");expect(detail).toContain("method:'DELETE'");
+    expect(detail).toContain("function revisionAuthor");
+    expect(detail).toContain("x.actor_display_name||'Unknown person'");
+    expect(detail).toContain("x.actor_id?'Agent '+x.actor_id:'Agent'");
+    expect(detail).toContain("return 'System'");
+    expect(detail).toContain("'By '+revisionAuthor(x)+' · '");
+    expect(detail).toContain("field+': '+change.previous+' → '+change.new");
+  });
+
+  it("preserves compact project administration and an intact picker during link confirmation", async () => {
+    const alice=await participant("alice"),html=await SELF.fetch(`${origin}/projects`,{headers:{cookie:alice.cookie}}).then(r=>r.text());
+    expect(html).toContain("if(j.canAdminister)d.append(button('Edit description'");
+    expect(html).toContain("{description:area.value}");
+    expect(html).toContain("Save description");
+    expect(html).toContain("button('Cancel',()=>descriptionPanel.replaceChildren())");
+    expect(html).toContain("const linkConfirm=el('div');lf.append(");
+    expect(html).toContain("ask(linkConfirm,'Explicitly grant");
+    expect(html).not.toContain("ask(lf,'Explicitly grant");
   });
 
   it("inserts project and Control Room values with text-only DOM APIs", async () => {
@@ -330,7 +347,7 @@ describe("browser UI", () => {
     expect(controlRoomHtml).not.toContain(dangerous);
     expect(controlRoomHtml).toContain('href="/api/me/export"');
     expect(projectsHtml).toContain("Add project…");
-    for(const popup of ["prompt(","confirm(","alert("]){expect(projectsHtml).not.toContain(popup);expect(controlRoomHtml).not.toContain(popup)}
+    for(const path of ["/me","/projects","/control-room","/invitations/inv_example"]){const html=await SELF.fetch(origin+path,{headers:{cookie:alice.cookie}}).then(r=>r.text()),scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match=>match[1]).join("\n");expect(scripts).not.toContain("innerHTML");for(const popup of ["prompt(","confirm(","alert("])expect(scripts).not.toContain(popup)}
   });
 
   it("redirects a 127.0.0.1 OAuth start to the configured canonical localhost origin", async () => {
