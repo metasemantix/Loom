@@ -1,9 +1,9 @@
 import { hashSecret, opaque, principalFor, sessionCookie } from "./auth";
-import { context, createDocument, deleteDocument, history, listDocuments, updateDocument, updateMetadata, uploadDocument } from "./documents";
+import { context, createDocument, deleteDocument, history, listDocuments, readDocument, updateDocument, updateMetadata, uploadDocument } from "./documents";
 import { json, parseCookies, problem, requireSameOrigin } from "./http";
 import type { Env } from "./types";
 import { exportSpace } from "./export";
-import { controlRoomPage, invitationPage, loginPage, projectsPage, spacePage } from "./ui";
+import { controlRoomPage, documentPage, invitationPage, loginPage, projectsPage, spacePage } from "./ui";
 import { getProfile, updateProfile } from "./profile";
 import { changeRole, createInvitation, createProject, getProject, linkDocument, listProjects, previewInvitation, removeMember, respondInvitation, revokeInvitation, transferOwnership, unlinkDocument, updateProject } from "./projects";
 
@@ -82,11 +82,15 @@ export default {
     if (request.method === "GET" && path === "/me") return spacePage(principal.displayName, principal.participantId);
     if (request.method === "GET" && path === "/control-room") return controlRoomPage();
     if (request.method === "GET" && path === "/projects") return projectsPage();
+    const humanDocumentMatch = path.match(/^\/documents\/(doc_[a-z0-9]+)$/);
+    if (humanDocumentMatch && request.method === "GET") return documentPage(humanDocumentMatch[1], url.searchParams.get("project"));
     const declineMatch = path.match(/^\/api\/invitations\/(inv_[a-z0-9]+)\/decline$/);
     if (request.method === "GET" && path === "/api/me/export") return exportSpace(env, principal);
     if (request.method === "GET" && path === "/api/me") return json({ user: { id: principal.userId, displayName: principal.displayName }, participant: { id: principal.participantId } });
     if (request.method === "GET" && path === "/api/me/profile") return getProfile(env, principal);
     if (request.method === "GET" && path === "/api/me/documents") return listDocuments(env, principal);
+    const readMatch = path.match(/^\/api\/documents\/(doc_[a-z0-9]+)$/);
+    if (readMatch && request.method === "GET") return readDocument(env, principal, readMatch[1], url.searchParams.get("project") ?? undefined);
     if (["POST", "PUT", "DELETE"].includes(request.method) && !requireSameOrigin(request)) return problem(403, "invalid_origin", "A same-origin request is required");
     if (invitationApiMatch && request.method === "POST") return respondInvitation(env, principal, invitationApiMatch[1], "accept");
     if (declineMatch && request.method === "POST") return respondInvitation(env, principal, declineMatch[1], "decline");

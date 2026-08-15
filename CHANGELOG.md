@@ -34,6 +34,9 @@ data and are not recorded here.
 
 - Local OAuth starts now use the configured callback origin when switching
   between `localhost` and `127.0.0.1`.
+- Consolidated the human interface around compact document/project collections,
+  inline creation and confirmation panels, a permission-aware document reader,
+  inline invitation-link copying, and account-level export in Control Room.
 
 ### Security
 

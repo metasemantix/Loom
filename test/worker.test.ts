@@ -157,6 +157,10 @@ describe("project link corpora", () => {
     await invite(projectId,alice,bob);
     expect((await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})})).status).toBe(201);
     const view=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<{documents:Array<{id:string;owner_participant_id:string}>}>());expect(view.documents[0]).toMatchObject({id:documentId,owner_participant_id:alice.id});
+    expect(JSON.stringify(view)).not.toContain("first");
+    expect((await SELF.fetch(`${origin}/api/documents/${documentId}?project=${projectId}`,{headers:{cookie:bob.cookie}})).status).toBe(200);
+    const outsider=await participant("outsider");
+    expect((await SELF.fetch(`${origin}/api/documents/${documentId}?project=${projectId}`,{headers:{cookie:outsider.cookie}})).status).toBe(404);
     expect((await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"DELETE",headers:{cookie:bob.cookie,origin}})).status).toBe(404);
     expect((await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({content:"steal",contentType:"text/plain"})})).status).toBe(404);
     expect((await SELF.fetch(`${origin}/api/projects/${projectId}/documents/${documentId}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}})).status).toBe(204);
@@ -164,6 +168,8 @@ describe("project link corpora", () => {
     await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})});
     await SELF.fetch(`${origin}/api/projects/${projectId}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({readAudience:"agents_only"})});
     const hidden=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<{documents:unknown[];documentsHiddenFromHumans:boolean}>());expect(hidden).toMatchObject({documents:[],documentsHiddenFromHumans:true});
+    expect((await SELF.fetch(`${origin}/api/documents/${documentId}?project=${projectId}`,{headers:{cookie:bob.cookie}})).status).toBe(404);
+    expect((await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}})).status).toBe(200);
     await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}});expect((await env.DB.prepare(`SELECT count(*) count FROM project_documents WHERE document_id=?`).bind(documentId).first<{count:number}>())!.count).toBe(0);
   });
 
@@ -293,28 +299,37 @@ describe("portable participant export", () => {
 });
 
 describe("browser UI", () => {
-  it("emits syntactically valid browser JavaScript for project and invitation pages", async () => {
+  it("emits syntactically valid browser JavaScript for every scripted page", async () => {
     const alice=await participant("alice");
-    for(const path of ["/projects","/invitations/inv_example"]){const html=await SELF.fetch(origin+path,{headers:{cookie:alice.cookie}}).then(r=>r.text());const scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match=>match[1]);expect(scripts.length).toBeGreaterThan(0);for(const script of scripts)expect(()=>new Function(script)).not.toThrow()}
+    const id=await create(alice.cookie);for(const path of ["/me","/projects","/control-room",`/documents/${id}`,"/invitations/inv_example"]){const html=await SELF.fetch(origin+path,{headers:{cookie:alice.cookie}}).then(r=>r.text());const scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match=>match[1]);expect(scripts.length).toBeGreaterThan(0);for(const script of scripts)expect(()=>new Function(script)).not.toThrow()}
   });
-  it("exposes document metadata and the existing edit, history, and confirmed-delete capabilities", async () => {
+  it("uses collapsed collection forms and keeps administration on document detail", async () => {
     const alice = await participant("alice");
+    const id = await create(alice.cookie);
     const response = await SELF.fetch(`${origin}/me`, { headers: { cookie: alice.cookie } });
     const html = await response.text();
     expect(response.status).toBe(200);
-    expect(html).toContain("Kind: ");
-    expect(html).toContain("Visibility: ");
-    expect(html).toContain("Save revision");
-    expect(html).toContain("Revision history");
-    expect(html).toContain("close=button('Close',()=>panel.replaceChildren())");
-    expect(html).toContain("By '+revisionAuthor(entry)+' · ");
-    expect(html).toContain("Unknown person");
-    expect(html).toContain("Agent '+v.actor_id");
-    expect(html).toContain("return 'System'");
-    expect(html).toContain("This cannot be undone.");
-    expect(html).toContain("method:'PUT'");
-    expect(html).toContain("method:'DELETE'");
-    expect(html).toContain('href="/api/me/export"');
+    expect(html).toContain("Add document…");expect(html).toContain('id="add-panel" class="panel" hidden');
+    expect(html).not.toContain("d.content");expect(html).not.toContain('href="/api/me/export"');
+    const detail=await SELF.fetch(`${origin}/documents/${id}`,{headers:{cookie:alice.cookie}}).then(r=>r.text());
+    expect(detail).toContain("Edit content");expect(detail).toContain("Revision history");expect(detail).toContain("This cannot be undone.");expect(detail).toContain("method:'DELETE'");
+    expect(detail).toContain("function revisionAuthor");
+    expect(detail).toContain("x.actor_display_name||'Unknown person'");
+    expect(detail).toContain("x.actor_id?'Agent '+x.actor_id:'Agent'");
+    expect(detail).toContain("return 'System'");
+    expect(detail).toContain("'By '+revisionAuthor(x)+' · '");
+    expect(detail).toContain("field+': '+change.previous+' → '+change.new");
+  });
+
+  it("preserves compact project administration and an intact picker during link confirmation", async () => {
+    const alice=await participant("alice"),html=await SELF.fetch(`${origin}/projects`,{headers:{cookie:alice.cookie}}).then(r=>r.text());
+    expect(html).toContain("if(j.canAdminister)d.append(button('Edit description'");
+    expect(html).toContain("{description:area.value}");
+    expect(html).toContain("Save description");
+    expect(html).toContain("button('Cancel',()=>descriptionPanel.replaceChildren())");
+    expect(html).toContain("const linkConfirm=el('div');lf.append(");
+    expect(html).toContain("ask(linkConfirm,'Explicitly grant");
+    expect(html).not.toContain("ask(lf,'Explicitly grant");
   });
 
   it("inserts project and Control Room values with text-only DOM APIs", async () => {
@@ -327,9 +342,12 @@ describe("browser UI", () => {
     expect(projectsHtml).not.toContain("innerHTML");
     expect(controlRoomHtml).not.toContain("innerHTML");
     expect(projectsHtml).toContain("n.textContent=text");
-    expect(controlRoomHtml).toContain("content.textContent=value");
+    expect(controlRoomHtml).toContain("v.textContent=value");
     expect(projectsHtml).not.toContain(dangerous);
     expect(controlRoomHtml).not.toContain(dangerous);
+    expect(controlRoomHtml).toContain('href="/api/me/export"');
+    expect(projectsHtml).toContain("Add project…");
+    for(const path of ["/me","/projects","/control-room","/invitations/inv_example"]){const html=await SELF.fetch(origin+path,{headers:{cookie:alice.cookie}}).then(r=>r.text()),scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match=>match[1]).join("\n");expect(scripts).not.toContain("innerHTML");for(const popup of ["prompt(","confirm(","alert("])expect(scripts).not.toContain(popup)}
   });
 
   it("redirects a 127.0.0.1 OAuth start to the configured canonical localhost origin", async () => {
