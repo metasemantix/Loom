@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
 import migration from "../migrations/0001_initial.sql?raw";
 import productSlice from "../migrations/0002_product_slice.sql?raw";
+import humanProjects from "../migrations/0003_human_projects.sql?raw";
 
-for (const statement of `${migration}\n${productSlice}`
+for (const statement of `${migration}\n${productSlice}\n${humanProjects}`
   .split(";")
   .map((part) => part.trim())
   .filter(Boolean)) {

@@ -3,9 +3,9 @@ import { context, createDocument, deleteDocument, history, listDocuments, update
 import { json, parseCookies, problem, requireSameOrigin } from "./http";
 import type { Env } from "./types";
 import { exportSpace } from "./export";
-import { controlRoomPage, loginPage, projectsPage, spacePage } from "./ui";
+import { controlRoomPage, invitationPage, loginPage, projectsPage, spacePage } from "./ui";
 import { getProfile, updateProfile } from "./profile";
-import { addMember, createProject, getProject, linkDocument, listProjects, removeMember, unlinkDocument, updateProject } from "./projects";
+import { changeRole, createInvitation, createProject, getProject, linkDocument, listProjects, previewInvitation, removeMember, respondInvitation, revokeInvitation, transferOwnership, unlinkDocument, updateProject } from "./projects";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -25,7 +25,12 @@ async function discordStart(request: Request, env: Env): Promise<Response> {
   const state = opaque("oauth"), expires = new Date(Date.now() + 10 * 60_000).toISOString();
   await env.DB.prepare(`INSERT INTO oauth_states(state_hash,expires_at) VALUES(?,?)`).bind(await hashSecret(state), expires).run();
   const query = new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, response_type: "code", redirect_uri: env.DISCORD_REDIRECT_URI, scope: "identify", state, prompt: "consent" });
-  return new Response(null, { status: 302, headers: { location: `https://discord.com/oauth2/authorize?${query}`, "set-cookie": `loom_oauth_state=${state}; Path=/auth/discord/callback; HttpOnly; Secure; SameSite=Lax; Max-Age=600` } });
+  const returnTo = new URL(request.url).searchParams.get("returnTo");
+  const safeReturn = returnTo && /^\/invitations\/inv_[a-z0-9]+$/.test(returnTo) ? returnTo : "/me";
+  const headers = new Headers({ location: `https://discord.com/oauth2/authorize?${query}` });
+  headers.append("set-cookie", `loom_oauth_state=${state}; Path=/auth/discord/callback; HttpOnly; Secure; SameSite=Lax; Max-Age=600`);
+  headers.append("set-cookie", `loom_oauth_return=${encodeURIComponent(safeReturn)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`);
+  return new Response(null, { status: 302, headers });
 }
 
 async function discordCallback(request: Request, env: Env): Promise<Response> {
@@ -54,7 +59,9 @@ async function discordCallback(request: Request, env: Env): Promise<Response> {
   }
   const secret = opaque("ses"), sessionId = opaque("sid"), expires = new Date(Date.now() + 30 * 86400_000).toISOString();
   await env.DB.prepare(`INSERT INTO sessions(id,user_id,secret_hash,expires_at,created_at) VALUES(?,?,?,?,?)`).bind(sessionId, identity.user_id, await hashSecret(secret), expires, now).run();
-  return new Response(null, { status: 302, headers: { location: "/me", "set-cookie": sessionCookie(secret) } });
+  const requestedReturn = decodeURIComponent(parseCookies(request).loom_oauth_return || "");
+  const location = /^\/invitations\/inv_[a-z0-9]+$/.test(requestedReturn) ? requestedReturn : "/me";
+  return new Response(null, { status: 302, headers: { location, "set-cookie": sessionCookie(secret) } });
 }
 
 export default {
@@ -64,6 +71,10 @@ export default {
     if (request.method === "GET" && path === "/login") return loginPage();
     if (request.method === "GET" && path === "/auth/discord") return discordStart(request, env);
     if (request.method === "GET" && path === "/auth/discord/callback") return discordCallback(request, env);
+    const invitationPageMatch = path.match(/^\/invitations\/(inv_[a-z0-9]+)$/);
+    if (invitationPageMatch && request.method === "GET") return invitationPage(invitationPageMatch[1]);
+    const invitationApiMatch = path.match(/^\/api\/invitations\/(inv_[a-z0-9]+)$/);
+    if (invitationApiMatch && request.method === "GET") return previewInvitation(env, invitationApiMatch[1]);
     const contextMatch = path.match(/^\/participants\/(par_[a-z0-9]+)\/context\.(json|md)$/);
     const principal = await principalFor(request, env);
     if (contextMatch && request.method === "GET") return context(request, env, contextMatch[1], contextMatch[2] as "json" | "md", principal);
@@ -71,11 +82,14 @@ export default {
     if (request.method === "GET" && path === "/me") return spacePage(principal.displayName, principal.participantId);
     if (request.method === "GET" && path === "/control-room") return controlRoomPage();
     if (request.method === "GET" && path === "/projects") return projectsPage();
+    const declineMatch = path.match(/^\/api\/invitations\/(inv_[a-z0-9]+)\/decline$/);
     if (request.method === "GET" && path === "/api/me/export") return exportSpace(env, principal);
     if (request.method === "GET" && path === "/api/me") return json({ user: { id: principal.userId, displayName: principal.displayName }, participant: { id: principal.participantId } });
     if (request.method === "GET" && path === "/api/me/profile") return getProfile(env, principal);
     if (request.method === "GET" && path === "/api/me/documents") return listDocuments(env, principal);
     if (["POST", "PUT", "DELETE"].includes(request.method) && !requireSameOrigin(request)) return problem(403, "invalid_origin", "A same-origin request is required");
+    if (invitationApiMatch && request.method === "POST") return respondInvitation(env, principal, invitationApiMatch[1], "accept");
+    if (declineMatch && request.method === "POST") return respondInvitation(env, principal, declineMatch[1], "decline");
     if (request.method === "PUT" && path === "/api/me/profile") return updateProfile(request, env, principal);
     if (request.method === "POST" && path === "/api/me/documents") return createDocument(request, env, principal);
     if (request.method === "POST" && path === "/api/me/documents/upload") return uploadDocument(request, env, principal);
@@ -91,10 +105,15 @@ export default {
     const projectMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)$/);
     if (projectMatch && request.method === "GET") return getProject(env, principal, projectMatch[1]);
     if (projectMatch && request.method === "PUT") return updateProject(request, env, principal, projectMatch[1]);
-    const membersMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/members$/);
-    if (membersMatch && request.method === "POST") return addMember(request, env, principal, membersMatch[1]);
     const memberMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/members\/(par_[a-z0-9]+)$/);
     if (memberMatch && request.method === "DELETE") return removeMember(env, principal, memberMatch[1], memberMatch[2]);
+    if (memberMatch && request.method === "PUT") return changeRole(request, env, principal, memberMatch[1], memberMatch[2]);
+    const invitationsMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/invitations$/);
+    if (invitationsMatch && request.method === "POST") return createInvitation(env, principal, invitationsMatch[1]);
+    const revokeMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/invitations\/(pin_[a-z0-9]+)$/);
+    if (revokeMatch && request.method === "DELETE") return revokeInvitation(env, principal, revokeMatch[1], revokeMatch[2]);
+    const transferMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/ownership$/);
+    if (transferMatch && request.method === "POST") return transferOwnership(request, env, principal, transferMatch[1]);
     const linksMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/documents$/);
     if (linksMatch && request.method === "POST") return linkDocument(request, env, principal, linksMatch[1]);
     const linkMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/documents\/(doc_[a-z0-9]+)$/);
