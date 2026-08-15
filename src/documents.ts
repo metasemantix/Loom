@@ -36,6 +36,25 @@ export async function listDocuments(env: Env, principal: Principal): Promise<Res
   return json({ documents: rows.results });
 }
 
+/** Human reading endpoint. Owners may always read; other participants need an
+ * explicit project link, current membership, and the human-readable policy. */
+export async function readDocument(env: Env, principal: Principal, id: string, projectId?: string): Promise<Response> {
+  const owned = await env.DB.prepare(`${currentDocuments} AND d.id=?`).bind(principal.participantId, id).first<DocumentRow>();
+  if (owned) return json({ document: owned, canEdit: true, context: "owner" });
+  if (!projectId) return problem(404, "not_found", "Document not found");
+  const shared = await env.DB.prepare(`SELECT d.id,d.kind,d.title,d.logical_path,d.visibility,d.original_filename,d.original_content_type,d.created_at,
+    v.id version_id,v.version_number,v.content,v.content_type,v.created_at updated_at,u.display_name owner_display_name
+    FROM project_documents pd JOIN projects project ON project.id=pd.project_id
+    JOIN project_members pm ON pm.project_id=project.id AND pm.participant_id=?
+    JOIN documents d ON d.id=pd.document_id AND d.deleted_at IS NULL
+    JOIN document_versions v ON v.id=d.current_version_id
+    JOIN participants p ON p.id=d.owner_id JOIN users u ON u.id=p.user_id
+    WHERE project.id=? AND project.read_audience='members_and_agents' AND d.id=?`)
+    .bind(principal.participantId, projectId, id).first<DocumentRow & { owner_display_name: string }>();
+  if (!shared) return problem(404, "not_found", "Document not found");
+  return json({ document: shared, canEdit: false, context: "project", projectId });
+}
+
 async function insertDocument(env: Env, principal: Principal, input: { title: string; kind: string; visibility: string; content: string; contentType: string; logicalPath?: string; originalFilename?: string; originalContentType?: string }): Promise<Response> {
   const error = contentError(input.content, input.contentType);
   if (error) return problem(400, "invalid_request", error);

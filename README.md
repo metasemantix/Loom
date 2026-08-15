@@ -46,7 +46,9 @@ than a participant identifier supplied by the browser.
 ## Product surfaces and API
 
 Signed-in participants manage their corpus at `/me`, their Loom identity at
-`/control-room`, and shared reference spaces at `/projects`. Document creation,
+`/control-room`, and shared reference spaces at `/projects`. Compact collection
+views open full content through the authorized `/documents/{document_id}` reader.
+Document creation,
 upload, content revisions, metadata changes, history, and deletion are exposed
 under `/api/me/documents`. Upload accepts faithful `.md`, `.txt`, and `.json`
 sources up to 256,000 bytes; JSON is validated and source filename/type metadata
