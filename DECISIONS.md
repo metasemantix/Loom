@@ -122,17 +122,73 @@ Administrators provide continuity for ongoing projects when the owner is absent 
 
 Project-owned artifacts belong to the project rather than to its current owner or administrators. They therefore survive the disappearance, departure, or replacement of an individual project owner unless the project itself is deleted or archived according to project lifecycle policy.
 
+Loss of activity or of an external authentication provider is not evidence that a Loom participant has abandoned a project. Loom must not automatically transfer project authority merely because an owner has not signed in or because a connected provider disappears.
+
+## Project lifecycle: active, archived, shell
+
+Projects have three conceptually distinct lifecycle states:
+
+- **Active:** normal collaboration. Subject to permissions, members may collaborate, link or create material, invite participants, administer the project, and later allow authorized agents to perform permitted mutations.
+- **Archived:** the collaboration is frozen/read-only. The project remains recognizable and readable according to existing access rules, but forward collaborative activity is suspended.
+- **Shell:** the active collaboration and corpus are gone. Only the minimal historical record needed for provenance and reference resolution remains. A shell is the result of project deletion and cannot be unarchived.
+
+Archiving freezes collaboration, not participant-owned data. It must not snapshot, duplicate, or otherwise preserve access to participant-owned source content independently of its owner.
+
+## Archived projects are read-only collaboration spaces
+
+Archiving should disable forward project activity, including new invitations or members, new document links/additions, project-owned document creation, document/project mutations, and future agent mutations or capabilities that would change the project.
+
+Administrative powers are dormant while a project is archived. Owners and administrators do not continue ordinary project administration merely because their historical roles remain recorded.
+
+Self-directed withdrawal remains available while archived:
+
+- any member may leave;
+- a participant may retract their own participant-owned document links at any time;
+- source owners retain all ordinary control over their participant-owned artifacts outside the project.
+
+Archiving must never make a participant-owned contribution irrevocable. Retraction of a participant-owned project link is permitted while the project is active or archived.
+
+When a project is archived, current members should receive a Loom notification. Participant-owned documents that remain linked to an archived project should be visibly marked in the owner's document overview so the owner is reminded that the contribution remains shared and may retract it.
+
+Archiving does not automatically retract participant-owned contributions on anyone's behalf.
+
+## Archived-project succession and reopening
+
+An archived project with an active owner may be explicitly unarchived by the owner. Where project policy permits, an existing administrator may also unarchive while the owner remains present, without changing ownership.
+
+If an archived project becomes ownerless through deliberate account deletion, an administrator who was already appointed before archival may explicitly reopen it. Reopening in this ownerless case is also the succession event: that administrator becomes the new owner.
+
+Until an administrator explicitly performs that operation, they remain only the recorded administrator of a frozen project and have no implicit ownership authority.
+
+An ownerless archived project with no existing administrator cannot be seized or reopened by ordinary members. It remains archived. Loom should not infer a successor or automatically promote a member.
+
+## Account deletion and owned projects
+
+Voluntary account deletion must deal explicitly with every active project owned by the departing participant rather than silently orphaning it.
+
+For each owned active project, the owner must choose a coherent disposition before account deletion completes, such as:
+
+- deliberately transfer ownership to an existing member (appointing/promoting as necessary), allowing the project to continue active;
+- archive the project, allowing any already-appointed administrator to become a possible explicit successor later under the archived-project reopening rule;
+- delete the project, leaving only its provenance shell.
+
+If there is no suitable successor, Loom must not invent one merely to permit account deletion.
+
+A project whose owner simply becomes inactive remains owned by that participant; inactivity alone does not trigger these account-deletion rules.
+
 ## Project deletion leaves a provenance shell
 
 Deleting a project should terminate the active collaboration without deleting participant-owned source artifacts.
 
 Deletion should revoke active project access, invalidate outstanding invitations, remove project-document links, and remove project-owned document bodies according to the project's deletion policy.
 
-Loom should retain a minimal historical project record — a "white dwarf" rather than a functioning project — so historical provenance does not collapse into an unresolvable identifier. This record may retain the stable project identity, former name, creation/deletion timestamps, and former membership/role information sufficient to understand historical references.
+Loom should retain a minimal historical project record — a shell rather than a functioning project — so historical provenance does not collapse into an unresolvable identifier. This record may retain the stable project identity, former name, creation/deletion timestamps, and former membership/role information sufficient to understand historical references.
 
 The retained shell must not remain a usable collaboration space, confer permissions, or preserve document bodies merely for convenience.
 
-Archiving is distinct from deletion: an archived project may remain intentionally readable and inspectable while becoming inactive/read-only, whereas a deleted project leaves only the minimal provenance shell.
+Project history/events may remain as provenance data where they are required to make the shell intelligible, but operational data and corpus content must not survive merely to make deletion easier to implement.
+
+A shell is terminal. It cannot be reopened or converted back into an active project.
 
 ## Intentional sharing should not require manual identifiers
 
