@@ -63,7 +63,7 @@ CREATE TABLE project_events_new (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   event_type TEXT NOT NULL CHECK(event_type IN (
     'ownership_transferred','project_archived','project_unarchived','member_left',
-    'member_removed','contribution_retracted','contribution_suspended','contribution_reauthorized'
+    'member_removed','contribution_added','contribution_retracted','contribution_suspended','contribution_reauthorized'
   )),
   actor_participant_id TEXT NOT NULL REFERENCES participants(id) ON DELETE RESTRICT,
   details_json TEXT NOT NULL,
