@@ -3,6 +3,7 @@
 ## Deferred lifecycle polish
 
 - Add a polished owner-side contribution re-authorization flow and persistent notifications for former contributors. The lifecycle schema and structured events preserve the state needed for both.
+- Historical contribution rows currently retain participant provenance through `ON DELETE RESTRICT` foreign keys. Account-deletion and participant-identity tombstone semantics must resolve that deliberately rather than deleting provenance or permanently blocking account deletion.
 
 Loom has moved beyond the original infrastructure vertical slice. Sign-in, participant-owned documents, revision and metadata history, upload, export, mutable visibility, Loom-native identity, logical paths, and the first project/link-corpus model already exist.
 

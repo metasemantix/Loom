@@ -134,15 +134,12 @@ export async function updateMetadata(request: Request, env: Env, principal: Prin
 
 export async function deleteDocument(env: Env, principal: Principal, id: string): Promise<Response> {
   if (!await ownedDocument(env, principal, id)) return problem(404, "not_found", "Document not found");
-  const relationships = await env.DB.prepare(`SELECT project_id FROM project_documents WHERE document_id=? AND source_owner_participant_id=? AND state!='retracted'`).bind(id, principal.participantId).all<{project_id:string}>();
-  const now = new Date().toISOString(), statements: D1PreparedStatement[] = [];
-  for (const relationship of relationships.results) {
-    const transitionId=opaque("ctr"), eventId=opaque("pev");
-    statements.push(env.DB.prepare(`UPDATE project_documents SET tombstone_title=CASE WHEN state='active' THEN (SELECT title FROM documents WHERE id=?) ELSE tombstone_title END,state='retracted',state_changed_at=?,state_changed_by_participant_id=?,state_transition_id=? WHERE project_id=? AND document_id=? AND source_owner_participant_id=? AND state!='retracted'`).bind(id,now,principal.participantId,transitionId,relationship.project_id,id,principal.participantId));
-    statements.push(env.DB.prepare(`INSERT INTO project_events(id,project_id,event_type,actor_participant_id,details_json,created_at) SELECT ?,?,'contribution_retracted',?,?,? WHERE EXISTS(SELECT 1 FROM project_documents WHERE project_id=? AND document_id=? AND state='retracted' AND state_transition_id=?)`).bind(eventId,relationship.project_id,principal.participantId,JSON.stringify({documentId:id}),now,relationship.project_id,id,transitionId));
-  }
-  statements.push(env.DB.prepare(`DELETE FROM documents WHERE id=? AND owner_id=?`).bind(id, principal.participantId));
-  const results=await env.DB.batch(statements);if(!results.at(-1)?.meta.changes)return problem(404,"not_found","Document not found");
+  const now=new Date().toISOString(),transitionId=opaque("ctr"),eventPrefix=opaque("pev"),details=JSON.stringify({documentId:id});
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE project_documents SET tombstone_title=CASE WHEN state='active' THEN (SELECT title FROM documents WHERE id=?) ELSE tombstone_title END,state='retracted',state_changed_at=?,state_changed_by_participant_id=?,state_transition_id=? WHERE document_id=? AND source_owner_participant_id=? AND state!='retracted' AND EXISTS(SELECT 1 FROM documents WHERE id=? AND owner_id=?)`).bind(id,now,principal.participantId,transitionId,id,principal.participantId,id,principal.participantId),
+    env.DB.prepare(`INSERT INTO project_events(id,project_id,event_type,actor_participant_id,details_json,created_at) SELECT ? || '_' || project_id,project_id,'contribution_retracted',?,?,? FROM project_documents WHERE document_id=? AND source_owner_participant_id=? AND state='retracted' AND state_transition_id=?`).bind(eventPrefix,principal.participantId,details,now,id,principal.participantId,transitionId),
+    env.DB.prepare(`DELETE FROM documents WHERE id=? AND owner_id=?`).bind(id,principal.participantId),
+  ]);if(!results[2].meta.changes)return problem(404,"not_found","Document not found");
   return new Response(null, { status: 204 });
 }
 
