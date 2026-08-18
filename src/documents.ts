@@ -49,7 +49,7 @@ export async function readDocument(env: Env, principal: Principal, id: string, p
     JOIN documents d ON d.id=pd.document_id AND d.deleted_at IS NULL
     JOIN document_versions v ON v.id=d.current_version_id
     JOIN participants p ON p.id=d.owner_id JOIN users u ON u.id=p.user_id
-    WHERE project.id=? AND project.read_audience='members_and_agents' AND d.id=?`)
+    WHERE project.id=? AND project.read_audience='members_and_agents' AND pd.state='active' AND d.id=?`)
     .bind(principal.participantId, projectId, id).first<DocumentRow & { owner_display_name: string }>();
   if (!shared) return problem(404, "not_found", "Document not found");
   return json({ document: shared, canEdit: false, context: "project", projectId });

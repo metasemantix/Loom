@@ -1,5 +1,7 @@
 # Changelog
 
+- Added reversible project archive enforcement, contribution lifecycle tombstones, safe leave/removal semantics, and owner-side controls for former contributors.
+
 ## 2026-08-14
 
 - Added owner-controlled document visibility, title, and logical-path changes

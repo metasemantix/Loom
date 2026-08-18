@@ -167,7 +167,7 @@ describe("project link corpora", () => {
     expect((await SELF.fetch(`${origin}/api/me/documents`,{headers:{cookie:alice.cookie}}).then(r=>r.json<{documents:unknown[]}>())).documents).toHaveLength(1);
     await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})});
     await SELF.fetch(`${origin}/api/projects/${projectId}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({readAudience:"agents_only"})});
-    const hidden=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<{documents:unknown[];documentsHiddenFromHumans:boolean}>());expect(hidden).toMatchObject({documents:[],documentsHiddenFromHumans:true});
+    const hidden=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<any>());expect(hidden.documentsHiddenFromHumans).toBe(true);expect(hidden.documents[0]).toMatchObject({id:documentId,state:"active",version_number:null});
     expect((await SELF.fetch(`${origin}/api/documents/${documentId}?project=${projectId}`,{headers:{cookie:bob.cookie}})).status).toBe(404);
     expect((await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}})).status).toBe(200);
     await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}});expect((await env.DB.prepare(`SELECT count(*) count FROM project_documents WHERE document_id=?`).bind(documentId).first<{count:number}>())!.count).toBe(0);
@@ -182,11 +182,27 @@ describe("project link corpora", () => {
 
     expect((await SELF.fetch(`${origin}/api/projects/${projectId}/members/${bob.id}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}})).status).toBe(204);
     expect((await env.DB.prepare(`SELECT owner_id FROM documents WHERE id=?`).bind(bobDocument).first<{owner_id:string}>())?.owner_id).toBe(bob.id);
-    const links=await env.DB.prepare(`SELECT document_id FROM project_documents WHERE project_id=? ORDER BY document_id`).bind(projectId).all<{document_id:string}>();
-    expect(links.results.map((link)=>link.document_id)).toEqual([carolDocument]);
+    const links=await env.DB.prepare(`SELECT document_id,state FROM project_documents WHERE project_id=? ORDER BY document_id`).bind(projectId).all<{document_id:string;state:string}>();
+    expect(links.results).toContainEqual({document_id:bobDocument,state:"suspended_after_removal"});
     const view=await SELF.fetch(`${origin}/api/projects/${projectId}`,{headers:{cookie:alice.cookie}}).then((response)=>response.json<{documents:Array<{id:string}>}>());
-    expect(view.documents.map((document)=>document.id)).toEqual([carolDocument]);
+    expect(view.documents.map((document)=>document.id).sort()).toEqual([bobDocument,carolDocument].sort());
     expect((await SELF.fetch(`${origin}/api/me/documents`,{headers:{cookie:bob.cookie}}).then((response)=>response.json<{documents:Array<{id:string}>}>())).documents.map((document)=>document.id)).toContain(bobDocument);
+  });
+
+  it("enforces archive and voluntary-leave contribution lifecycles", async () => {
+    const alice=await participant("alice"),bob=await participant("bob"),doc=await create(bob.cookie,"private");
+    const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Lifecycle",readAudience:"members_and_agents"})}).then(r=>r.json<any>()),id=made.project.id;
+    await invite(id,alice,bob);await SELF.fetch(`${origin}/api/projects/${id}/documents`,{method:"POST",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId:doc})});
+    const pending=await SELF.fetch(`${origin}/api/projects/${id}/invitations`,{method:"POST",headers:{cookie:alice.cookie,origin}}).then(r=>r.json<any>());
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/archive`,{method:"POST",headers:{cookie:bob.cookie,origin}})).status).toBe(403);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/archive`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(200);
+    expect((await SELF.fetch(`${origin}/api/invitations/${pending.invitation.token}`,{method:"POST",headers:{cookie:bob.cookie,origin}})).status).toBe(410);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({description:"blocked"})})).status).toBe(409);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/members/${bob.id}`,{method:"DELETE",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({withdrawContributions:false})})).status).toBe(204);
+    expect((await env.DB.prepare(`SELECT state FROM project_documents WHERE project_id=? AND document_id=?`).bind(id,doc).first<any>()).state).toBe("active");
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/documents/${doc}`,{method:"DELETE",headers:{cookie:bob.cookie,origin}})).status).toBe(204);
+    expect((await env.DB.prepare(`SELECT state FROM project_documents WHERE project_id=? AND document_id=?`).bind(id,doc).first<any>()).state).toBe("retracted");
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/unarchive`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(200);
   });
 });
 
@@ -323,7 +339,7 @@ describe("browser UI", () => {
 
   it("preserves compact project administration and an intact picker during link confirmation", async () => {
     const alice=await participant("alice"),html=await SELF.fetch(`${origin}/projects`,{headers:{cookie:alice.cookie}}).then(r=>r.text());
-    expect(html).toContain("if(j.canAdminister)d.append(button('Edit description'");
+    expect(html).toContain("Archive project");
     expect(html).toContain("{description:area.value}");
     expect(html).toContain("Save description");
     expect(html).toContain("button('Cancel',()=>descriptionPanel.replaceChildren())");
