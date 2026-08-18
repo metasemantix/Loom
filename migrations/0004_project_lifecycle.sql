@@ -26,6 +26,38 @@ DROP TABLE project_documents;
 ALTER TABLE project_documents_new RENAME TO project_documents;
 CREATE INDEX project_documents_document ON project_documents(document_id);
 
+-- The historical relationship intentionally has no document FK, so commit-time
+-- triggers replace the old cascade without permitting live dangling grants.
+CREATE TRIGGER project_documents_active_source_insert
+BEFORE INSERT ON project_documents
+WHEN NEW.state='active' AND NOT EXISTS (
+  SELECT 1 FROM documents d WHERE d.id=NEW.document_id AND d.owner_type='participant'
+    AND d.owner_id=NEW.source_owner_participant_id AND d.deleted_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'active contribution requires a live owned source');
+END;
+
+CREATE TRIGGER project_documents_active_source_update
+BEFORE UPDATE OF state,document_id,source_owner_participant_id ON project_documents
+WHEN NEW.state='active' AND NOT EXISTS (
+  SELECT 1 FROM documents d WHERE d.id=NEW.document_id AND d.owner_type='participant'
+    AND d.owner_id=NEW.source_owner_participant_id AND d.deleted_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT, 'active contribution requires a live owned source');
+END;
+
+CREATE TRIGGER documents_tombstone_project_contributions
+BEFORE DELETE ON documents
+BEGIN
+  UPDATE project_documents
+  SET tombstone_title=CASE WHEN state='active' THEN OLD.title ELSE tombstone_title END,
+      state='retracted',
+      state_changed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  WHERE document_id=OLD.id AND source_owner_participant_id=OLD.owner_id AND state!='retracted';
+END;
+
 CREATE TABLE project_events_new (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

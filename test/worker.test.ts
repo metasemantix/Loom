@@ -197,8 +197,13 @@ describe("project link corpora", () => {
   it("never leaves an active dangling contribution when linking races source deletion", async () => {
     const alice=await participant("alice"),documentId=await create(alice.cookie,"private"),created=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Commit boundary",readAudience:"members_and_agents"})}).then(r=>r.json<any>()),projectId=created.project.id;
     const [link,deleted]=await Promise.all([SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})}),SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}})]);expect([201,404]).toContain(link.status);expect(deleted.status).toBe(204);
-    const final=await env.DB.prepare(`SELECT pd.document_id,pd.state,pd.tombstone_title,d.id source_id FROM project_documents pd LEFT JOIN documents d ON d.id=pd.document_id WHERE pd.project_id=? AND pd.document_id=?`).bind(projectId,documentId).first<any>();if(final){expect(final.document_id).toBe(documentId);expect(final.state).toBe("retracted");expect(final.source_id).toBeNull();expect(final.tombstone_title).toBe("Notes")}
+    const final=await env.DB.prepare(`SELECT pd.document_id,pd.state,pd.tombstone_title,d.id source_id FROM project_documents pd LEFT JOIN documents d ON d.id=pd.document_id WHERE pd.project_id=? AND pd.document_id=?`).bind(projectId,documentId).first<any>();if(link.status===201){expect(final).toMatchObject({document_id:documentId,state:"retracted",source_id:null,tombstone_title:"Notes"})}else expect(final).toBeNull();
     expect((await env.DB.prepare(`SELECT count(*) count FROM project_documents pd LEFT JOIN documents d ON d.id=pd.document_id WHERE pd.state='active' AND d.id IS NULL`).first<any>()).count).toBe(0);expect((await SELF.fetch(`${origin}/api/documents/${documentId}?project=${projectId}`,{headers:{cookie:alice.cookie}})).status).toBe(404);
+  });
+
+  it("enforces the live-source invariant at the database boundary", async () => {
+    const alice=await participant("alice"),created=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Structural guard",readAudience:"members_and_agents"})}).then(r=>r.json<any>()),projectId=created.project.id;
+    await expect(env.DB.prepare(`INSERT INTO project_documents(project_id,document_id,source_owner_participant_id,added_by_participant_id,added_at,state) VALUES(?,?,?,?,?,'active')`).bind(projectId,"doc_missing",alice.id,alice.id,new Date().toISOString()).run()).rejects.toThrow("active contribution requires a live owned source");
   });
 
   it("enforces archive and voluntary-leave contribution lifecycles", async () => {
