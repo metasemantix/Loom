@@ -11,6 +11,7 @@ ALTER TABLE project_documents ADD COLUMN state TEXT NOT NULL DEFAULT 'active'
 ALTER TABLE project_documents ADD COLUMN state_changed_at TEXT;
 ALTER TABLE project_documents ADD COLUMN state_changed_by_participant_id TEXT REFERENCES participants(id) ON DELETE SET NULL;
 ALTER TABLE project_documents ADD COLUMN tombstone_title TEXT;
+ALTER TABLE project_documents ADD COLUMN state_transition_id TEXT;
 
 CREATE TABLE project_events_new (
   id TEXT PRIMARY KEY,

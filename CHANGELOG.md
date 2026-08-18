@@ -2,6 +2,7 @@
 
 - Added reversible project archive enforcement, contribution lifecycle tombstones, safe leave/removal semantics, and owner-side controls for former contributors.
 - Active contributions now track current source titles, while unavailable contribution tombstones freeze permitted metadata; lifecycle-conditioned writes and transitions also reject stale archive races.
+- Former contributors can explicitly reauthorize a suspended contribution without regaining project membership or visibility.
 
 ## 2026-08-14
 
