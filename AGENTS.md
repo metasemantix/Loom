@@ -2,6 +2,12 @@
 
 This file contains operating rules for coding agents working on Loom.
 
+## Current task
+
+- If `CODEX_TASK.md` exists, read it before changing code. It is the current bounded implementation assignment and must be read together with the architecture and decision documents it references.
+- `CODEX_TASK.md` does not override settled architecture. If it appears to conflict with `DECISIONS.md` or the relevant architecture documents, preserve the settled architecture and report the conflict rather than silently choosing an interpretation.
+- Stay within the current task's explicit scope and non-goals.
+
 ## Before changing code
 
 - Read `VISION.md`, `DECISIONS.md`, `LATER.md`, `README.md`, and the relevant existing implementation before making architectural changes.
