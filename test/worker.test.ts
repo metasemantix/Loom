@@ -198,11 +198,39 @@ describe("project link corpora", () => {
     expect((await SELF.fetch(`${origin}/api/projects/${id}/archive`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(200);
     expect((await SELF.fetch(`${origin}/api/invitations/${pending.invitation.token}`,{method:"POST",headers:{cookie:bob.cookie,origin}})).status).toBe(410);
     expect((await SELF.fetch(`${origin}/api/projects/${id}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({description:"blocked"})})).status).toBe(409);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/members/${bob.id}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({role:"admin"})})).status).toBe(409);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/ownership`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({participantId:bob.id,confirm:true})})).status).toBe(409);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/members/${bob.id}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}})).status).toBe(409);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/documents`,{method:"POST",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId:doc})})).status).toBe(409);
     expect((await SELF.fetch(`${origin}/api/projects/${id}/members/${bob.id}`,{method:"DELETE",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({withdrawContributions:false})})).status).toBe(204);
     expect((await env.DB.prepare(`SELECT state FROM project_documents WHERE project_id=? AND document_id=?`).bind(id,doc).first<any>()).state).toBe("active");
     expect((await SELF.fetch(`${origin}/api/projects/${id}/documents/${doc}`,{method:"DELETE",headers:{cookie:bob.cookie,origin}})).status).toBe(204);
     expect((await env.DB.prepare(`SELECT state FROM project_documents WHERE project_id=? AND document_id=?`).bind(id,doc).first<any>()).state).toBe("retracted");
     expect((await SELF.fetch(`${origin}/api/projects/${id}/unarchive`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(200);
+  });
+
+  it("uses live metadata only while a contribution is active and freezes tombstones", async () => {
+    const alice=await participant("alice"),bob=await participant("bob"),doc=await create(bob.cookie,"private");
+    const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Metadata",readAudience:"members_and_agents"})}).then(r=>r.json<any>()),id=made.project.id;await invite(id,alice,bob);
+    await SELF.fetch(`${origin}/api/projects/${id}/documents`,{method:"POST",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId:doc})});
+    await SELF.fetch(`${origin}/api/me/documents/${doc}/metadata`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Current project title"})});
+    let contribution=(await SELF.fetch(`${origin}/api/projects/${id}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).documents[0];
+    expect(contribution).toMatchObject({id:doc,title:"Current project title",state:"active"});expect(contribution.logical_path).toBeTruthy();expect(contribution.visibility).toBe("private");
+    await SELF.fetch(`${origin}/api/projects/${id}/members/${bob.id}`,{method:"DELETE",headers:{cookie:alice.cookie,origin}});
+    contribution=(await SELF.fetch(`${origin}/api/projects/${id}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).documents[0];
+    expect(contribution).toMatchObject({id:doc,title:"Current project title",state:"suspended_after_removal",logical_path:null,visibility:null});
+    await SELF.fetch(`${origin}/api/me/documents/${doc}/metadata`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Private later title",logicalPath:"private/later",visibility:"public"})});
+    contribution=(await SELF.fetch(`${origin}/api/projects/${id}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).documents[0];
+    expect(contribution).toMatchObject({id:doc,title:"Current project title",state:"suspended_after_removal",logical_path:null,visibility:null});
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/documents/${doc}`,{method:"DELETE",headers:{cookie:bob.cookie,origin}})).status).toBe(204);
+    contribution=(await SELF.fetch(`${origin}/api/projects/${id}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).documents[0];expect(contribution).toMatchObject({id:doc,title:"Current project title",state:"retracted"});
+  });
+
+  it("makes stale lifecycle transitions conflict without false events", async () => {
+    const alice=await participant("alice");const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Race",readAudience:"members_and_agents"})}).then(r=>r.json<any>()),id=made.project.id;
+    const options={method:"POST",headers:{cookie:alice.cookie,origin}};const statuses=(await Promise.all([SELF.fetch(`${origin}/api/projects/${id}/archive`,options),SELF.fetch(`${origin}/api/projects/${id}/archive`,options)])).map(r=>r.status).sort();expect(statuses).toEqual([200,409]);
+    expect((await env.DB.prepare(`SELECT count(*) count FROM project_events WHERE project_id=? AND event_type='project_archived'`).bind(id).first<any>()).count).toBe(1);
+    expect((await SELF.fetch(`${origin}/api/projects/${id}/invitations`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(409);
   });
 });
 
@@ -340,6 +368,9 @@ describe("browser UI", () => {
   it("preserves compact project administration and an intact picker during link confirmation", async () => {
     const alice=await participant("alice"),html=await SELF.fetch(`${origin}/projects`,{headers:{cookie:alice.cookie}}).then(r=>r.text());
     expect(html).toContain("Archive project");
+    expect(html).toContain("p.status==='active'&&p.role==='owner'");
+    expect(html).toContain("j.canAdminister&&p.status==='active'");
+    expect(html).toContain("Their contributed content will become unavailable, while contribution history remains.");
     expect(html).toContain("{description:area.value}");
     expect(html).toContain("Save description");
     expect(html).toContain("button('Cancel',()=>descriptionPanel.replaceChildren())");

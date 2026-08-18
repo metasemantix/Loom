@@ -4,6 +4,7 @@ ALTER TABLE projects ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'active'
   CHECK(lifecycle_state IN ('active', 'archived'));
 ALTER TABLE projects ADD COLUMN archived_at TEXT;
 ALTER TABLE projects ADD COLUMN archived_by_participant_id TEXT REFERENCES participants(id) ON DELETE SET NULL;
+ALTER TABLE projects ADD COLUMN lifecycle_transition_id TEXT;
 
 ALTER TABLE project_documents ADD COLUMN state TEXT NOT NULL DEFAULT 'active'
   CHECK(state IN ('active', 'suspended_after_removal', 'retracted'));
