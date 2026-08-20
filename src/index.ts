@@ -5,7 +5,7 @@ import type { Env } from "./types";
 import { exportSpace } from "./export";
 import { controlRoomPage, documentPage, invitationPage, loginPage, projectsPage, spacePage } from "./ui";
 import { getProfile, updateProfile } from "./profile";
-import { changeRole, createInvitation, createProject, getProject, linkDocument, listProjects, previewInvitation, removeMember, respondInvitation, revokeInvitation, transferOwnership, unlinkDocument, updateProject } from "./projects";
+import { changeRole, createInvitation, createProject, getProject, linkDocument, listOwnedContributions, listProjects, previewInvitation, reauthorizeContribution, removeMember, respondInvitation, revokeInvitation, setProjectLifecycle, transferOwnership, unlinkDocument, updateProject } from "./projects";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -105,12 +105,13 @@ export default {
     const metadataMatch = path.match(/^\/api\/me\/documents\/(doc_[a-z0-9]+)\/metadata$/);
     if (metadataMatch && request.method === "PUT") return updateMetadata(request, env, principal, metadataMatch[1]);
     if (request.method === "GET" && path === "/api/projects") return listProjects(env, principal);
+    if (request.method === "GET" && path === "/api/me/contributions") return listOwnedContributions(env, principal);
     if (request.method === "POST" && path === "/api/projects") return createProject(request, env, principal);
     const projectMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)$/);
     if (projectMatch && request.method === "GET") return getProject(env, principal, projectMatch[1]);
     if (projectMatch && request.method === "PUT") return updateProject(request, env, principal, projectMatch[1]);
     const memberMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/members\/(par_[a-z0-9]+)$/);
-    if (memberMatch && request.method === "DELETE") return removeMember(env, principal, memberMatch[1], memberMatch[2]);
+    if (memberMatch && request.method === "DELETE") return removeMember(request, env, principal, memberMatch[1], memberMatch[2]);
     if (memberMatch && request.method === "PUT") return changeRole(request, env, principal, memberMatch[1], memberMatch[2]);
     const invitationsMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/invitations$/);
     if (invitationsMatch && request.method === "POST") return createInvitation(env, principal, invitationsMatch[1]);
@@ -122,6 +123,10 @@ export default {
     if (linksMatch && request.method === "POST") return linkDocument(request, env, principal, linksMatch[1]);
     const linkMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/documents\/(doc_[a-z0-9]+)$/);
     if (linkMatch && request.method === "DELETE") return unlinkDocument(env, principal, linkMatch[1], linkMatch[2]);
+    const reauthorizeMatch = path.match(/^\/api\/me\/contributions\/(prj_[a-z0-9]+)\/(doc_[a-z0-9]+)\/reauthorize$/);
+    if (reauthorizeMatch && request.method === "POST") return reauthorizeContribution(env, principal, reauthorizeMatch[1], reauthorizeMatch[2]);
+    const archiveMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/(archive|unarchive)$/);
+    if (archiveMatch && request.method === "POST") return setProjectLifecycle(env, principal, archiveMatch[1], archiveMatch[2] === "archive" ? "archived" : "active");
     return problem(404, "not_found", "Route not found");
   },
 } satisfies ExportedHandler<Env>;

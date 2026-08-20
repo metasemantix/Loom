@@ -49,7 +49,7 @@ export async function readDocument(env: Env, principal: Principal, id: string, p
     JOIN documents d ON d.id=pd.document_id AND d.deleted_at IS NULL
     JOIN document_versions v ON v.id=d.current_version_id
     JOIN participants p ON p.id=d.owner_id JOIN users u ON u.id=p.user_id
-    WHERE project.id=? AND project.read_audience='members_and_agents' AND d.id=?`)
+    WHERE project.id=? AND project.read_audience='members_and_agents' AND pd.state='active' AND d.id=?`)
     .bind(principal.participantId, projectId, id).first<DocumentRow & { owner_display_name: string }>();
   if (!shared) return problem(404, "not_found", "Document not found");
   return json({ document: shared, canEdit: false, context: "project", projectId });
@@ -134,7 +134,12 @@ export async function updateMetadata(request: Request, env: Env, principal: Prin
 
 export async function deleteDocument(env: Env, principal: Principal, id: string): Promise<Response> {
   if (!await ownedDocument(env, principal, id)) return problem(404, "not_found", "Document not found");
-  await env.DB.prepare(`DELETE FROM documents WHERE id=? AND owner_id=?`).bind(id, principal.participantId).run();
+  const now=new Date().toISOString(),transitionId=opaque("ctr"),eventPrefix=opaque("pev"),details=JSON.stringify({documentId:id});
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE project_documents SET tombstone_title=CASE WHEN state='active' THEN (SELECT title FROM documents WHERE id=?) ELSE tombstone_title END,state='retracted',state_changed_at=?,state_changed_by_participant_id=?,state_transition_id=? WHERE document_id=? AND source_owner_participant_id=? AND state!='retracted' AND EXISTS(SELECT 1 FROM documents WHERE id=? AND owner_id=?)`).bind(id,now,principal.participantId,transitionId,id,principal.participantId,id,principal.participantId),
+    env.DB.prepare(`INSERT INTO project_events(id,project_id,event_type,actor_participant_id,details_json,created_at) SELECT ? || '_' || project_id,project_id,'contribution_retracted',?,?,? FROM project_documents WHERE document_id=? AND source_owner_participant_id=? AND state='retracted' AND state_transition_id=?`).bind(eventPrefix,principal.participantId,details,now,id,principal.participantId,transitionId),
+    env.DB.prepare(`DELETE FROM documents WHERE id=? AND owner_id=?`).bind(id,principal.participantId),
+  ]);if(!results[2].meta.changes)return problem(404,"not_found","Document not found");
   return new Response(null, { status: 204 });
 }
 
