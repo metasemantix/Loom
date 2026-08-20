@@ -400,9 +400,64 @@ describe("browser UI", () => {
     expect(html).toContain("{description:area.value}");
     expect(html).toContain("Save description");
     expect(html).toContain("button('Cancel',()=>descriptionPanel.replaceChildren())");
+    expect(html).toContain("d.append(el('h3','Project administration'))");
+    expect(html).toContain("d.append(descriptionPanel)");
+    expect(html).not.toContain("d.append(el('h3','Project details'),el('p',p.description");
     expect(html).toContain("const linkConfirm=el('div');lf.append(");
     expect(html).toContain("ask(linkConfirm,'Explicitly grant");
     expect(html).not.toContain("ask(lf,'Explicitly grant");
+  });
+
+  it("mounts and submits the Unarchive confirmation for an archived project", async () => {
+    class BrowserElement {
+      children: BrowserElement[] = [];
+      textContent = "";
+      className = "";
+      type = "";
+      role = "";
+      hidden = false;
+      onclick?: () => unknown;
+      onsubmit?: (event: { preventDefault(): void }) => unknown;
+      parent?: BrowserElement;
+      append(...nodes: Array<BrowserElement | string>) { for (const node of nodes) if (node instanceof BrowserElement) { node.parent = this; this.children.push(node); } }
+      prepend(node: BrowserElement) { node.parent = this; this.children.unshift(node); }
+      replaceChildren(...nodes: BrowserElement[]) { this.children = []; this.append(...nodes); }
+      remove() { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); }
+      focus() {}
+      setAttribute() {}
+      querySelector(selector: string): BrowserElement | null { return this.querySelectorAll(selector)[0] ?? null; }
+      querySelectorAll(selector: string): BrowserElement[] {
+        const matches = (node: BrowserElement) => selector === "button" ? node.type === "button" : selector === "section" ? node.tag === "section" : selector === ".notice" ? node.className.split(" ").includes("notice") : false;
+        const found: BrowserElement[] = [];
+        const visit = (node: BrowserElement) => { for (const child of node.children) { if (matches(child)) found.push(child); visit(child); } };
+        visit(this); return found;
+      }
+      constructor(readonly tag: string) {}
+    }
+    const alice = await participant("alice");
+    const html = await SELF.fetch(`${origin}/projects`, { headers: { cookie: alice.cookie } }).then((response) => response.text());
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+    const helpers = script.slice(script.indexOf("function el"), script.indexOf("function toggle"));
+    const projectProgram = script.slice(script.indexOf("function memberRow"), script.indexOf("newForm.onsubmit"));
+    const browserProgram = helpers + projectProgram + ";return {openProject};";
+    const document = { createElement: (tag: string) => new BrowserElement(tag) };
+    const requests: Array<{ url: string; method?: string }> = [];
+    const project = { id: "archived-project", name: "Finished work", description: "Kept in the collapsed overview", status: "archived", readAudience: "members_and_agents", role: "owner" };
+    const fetch = async (url: string, options: { method?: string } = {}) => {
+      requests.push({ url, method: options.method });
+      if (url === "/api/projects/archived-project/unarchive") return { ok: true, json: async () => ({}) };
+      return { ok: true, json: async () => ({ project, canAdminister: true, members: [], documents: [], documentsHiddenFromHumans: false }) };
+    };
+    const { openProject } = new Function("document", "fetch", "URL", "location", "navigator", browserProgram)(document, fetch, URL, { origin }, {});
+    const card = new BrowserElement("article");
+    await openProject(project.id, card);
+    const unarchive = card.querySelectorAll("button").find((button) => button.textContent === "Unarchive project");
+    expect(unarchive).toBeTruthy();
+    await unarchive!.onclick!();
+    const confirmation = card.querySelectorAll("button").find((button) => button.textContent === "Continue");
+    expect(confirmation).toBeTruthy();
+    await confirmation!.onclick!();
+    expect(requests).toContainEqual({ url: "/api/projects/archived-project/unarchive", method: "POST" });
   });
 
   it("inserts project and Control Room values with text-only DOM APIs", async () => {
