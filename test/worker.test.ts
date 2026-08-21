@@ -250,6 +250,7 @@ describe("project link corpora", () => {
     expect((await SELF.fetch(`${origin}/api/me/contributions/${id}/${doc}/reauthorize`,{method:"POST",headers:{cookie:bob.cookie,origin}})).status).toBe(200);await SELF.fetch(`${origin}/api/me/documents/${doc}/metadata`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Retraction title"})});expect((await SELF.fetch(`${origin}/api/projects/${id}/documents/${doc}`,{method:"DELETE",headers:{cookie:bob.cookie,origin}})).status).toBe(204);
     contribution=(await SELF.fetch(`${origin}/api/projects/${id}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).documents[0];expect(contribution).toMatchObject({id:doc,title:"Retraction title",state:"retracted"});expect((await SELF.fetch(`${origin}/api/documents/${doc}?project=${id}`,{headers:{cookie:alice.cookie}})).status).toBe(404);
     const events=await env.DB.prepare(`SELECT event_type,actor_participant_id,details_json,created_at FROM project_events WHERE project_id=? AND event_type IN ('contribution_reauthorized','contribution_suspended','contribution_retracted') ORDER BY created_at,id`).bind(id).all<any>();expect(events.results.filter((x:any)=>x.event_type==="contribution_reauthorized")).toHaveLength(2);for(const event of events.results.filter((x:any)=>x.event_type==="contribution_reauthorized")){expect(event.actor_participant_id).toBe(bob.id);expect(JSON.parse(event.details_json)).toMatchObject({documentId:doc,ownerParticipantId:bob.id});expect(event.created_at).toBeTruthy()}
+    const activity=await SELF.fetch(`${origin}/api/projects/${id}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(activity.events.map((event:any)=>event.event_type)).toEqual(expect.arrayContaining(["member_removed","contribution_suspended","contribution_reauthorized","contribution_retracted"]));expect(activity.events.some((event:any)=>event.document_title==="Retraction title")).toBe(true);expect(JSON.stringify(activity.events)).not.toContain("first");expect(JSON.stringify(activity.events)).not.toContain("private/later");expect(activity.events.every((event:any)=>!("details_json" in event))).toBe(true);
   });
 
   it("makes stale lifecycle transitions conflict without false events", async () => {
@@ -406,6 +407,9 @@ describe("browser UI", () => {
     expect(html).toContain("const linkConfirm=el('div');lf.append(");
     expect(html).toContain("ask(linkConfirm,'Explicitly grant");
     expect(html).not.toContain("ask(lf,'Explicitly grant");
+    expect(html).toContain("Add to project");expect(html).toContain("Show details");expect(html).toContain("Hide details");
+    expect(html).toContain("Restore contribution");expect(html).toContain("/reauthorize");
+    expect(html).toContain("Are you sure you want to leave this project?");expect(html).toContain("withdrawContributions:check.checked");expect(html).toContain("check.type='checkbox'");expect(html).not.toContain("check.checked=true");
   });
 
   it("mounts and submits the Unarchive confirmation for an archived project", async () => {
@@ -446,11 +450,13 @@ describe("browser UI", () => {
     const fetch = async (url: string, options: { method?: string } = {}) => {
       requests.push({ url, method: options.method });
       if (url === "/api/projects/archived-project/unarchive") return { ok: true, json: async () => ({}) };
-      return { ok: true, json: async () => ({ project, canAdminister: true, members: [], documents: [], documentsHiddenFromHumans: false }) };
+      return { ok: true, json: async () => ({ project, canAdminister: true, members: [], documents: [], events: [], documentsHiddenFromHumans: false }) };
     };
     const { openProject } = new Function("document", "fetch", "URL", "location", "navigator", browserProgram)(document, fetch, URL, { origin }, {});
-    const card = new BrowserElement("article");
-    await openProject(project.id, card);
+    const card = new BrowserElement("article"), toggle = new BrowserElement("button"); toggle.textContent = "Show details"; card.append(toggle);
+    await openProject(project.id, card, toggle);
+    expect(toggle.textContent).toBe("Hide details");
+    expect(card.querySelectorAll("section")).toHaveLength(1);
     const unarchive = card.querySelectorAll("button").find((button) => button.textContent === "Unarchive project");
     expect(unarchive).toBeTruthy();
     await unarchive!.onclick!();
@@ -458,6 +464,10 @@ describe("browser UI", () => {
     expect(confirmation).toBeTruthy();
     await confirmation!.onclick!();
     expect(requests).toContainEqual({ url: "/api/projects/archived-project/unarchive", method: "POST" });
+    await openProject(project.id, card, toggle);
+    expect(toggle.textContent).toBe("Show details"); expect(card.querySelectorAll("section")).toHaveLength(0);
+    await openProject(project.id, card, toggle);
+    expect(toggle.textContent).toBe("Hide details"); expect(card.querySelectorAll("section")).toHaveLength(1);
   });
 
   it("inserts project and Control Room values with text-only DOM APIs", async () => {
