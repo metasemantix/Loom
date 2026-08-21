@@ -2,7 +2,12 @@
 
 ## Deferred lifecycle polish
 
-- Add a polished owner-side contribution re-authorization flow and persistent notifications for former contributors. The lifecycle schema and structured events preserve the state needed for both.
+- Add a polished owner-side contribution re-authorization flow and persistent notifications for former contributors. The lifecycle schema and structured events preserve the state needed for both. In the current UI, `suspended_after_removal` is visible and can be retracted, but the existing backend re-authorization path is not yet surfaced; add a clear owner-side **Restore contribution** action that does not restore project membership or project visibility.
+- Add a human-readable project activity/history view over the structured lifecycle and contribution events already being recorded. Preserve stable document IDs and provenance continuity; do not expose unavailable document bodies through the log.
+- Improve project-card expansion UX: replace the current one-way **Open project** expansion with an explicit show/hide (or equivalent) toggle so an expanded project can be collapsed and the action does not continue to say “Open project” while already open.
+- Rename the document contribution action currently labelled **Review link**. It refers to granting a document to the project rather than reviewing a URL; prefer direct contribution wording such as **Add to project**, while retaining the explicit grant confirmation before the mutation.
+- Tidy the voluntary-leave confirmation layout. The current checkbox appears only after **Leave project** is clicked, which is semantically fine, but it should render as a coherent confirmation panel containing the question, unchecked **Withdraw my contributions from this project** option, Leave action, and Cancel action.
+- Consider document-level lifecycle event granularity when one membership action affects several contributions. Current aggregate suspension/retraction events preserve operational state, but a detailed project changelog may benefit from one stable-document event per affected contribution.
 - Historical contribution rows currently retain participant provenance through `ON DELETE RESTRICT` foreign keys. Account-deletion and participant-identity tombstone semantics must resolve that deliberately rather than deleting provenance or permanently blocking account deletion.
 
 Loom has moved beyond the original infrastructure vertical slice. Sign-in, participant-owned documents, revision and metadata history, upload, export, mutable visibility, Loom-native identity, logical paths, and the first project/link-corpus model already exist.
