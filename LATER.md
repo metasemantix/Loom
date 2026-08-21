@@ -27,7 +27,9 @@ A respectable MVP should let a participant:
 - deliberately link participant-owned material into a project without surrendering ownership;
 - deliberately create or copy material into a project-owned corpus when collective ownership is intended;
 - understand who administers a project and what happens if its creator disappears;
-- leave or remove a participant without leaving their participant-owned project grants behind;
+- leave voluntarily while explicitly choosing whether their participant-owned contributions remain available or are retracted;
+- remove a participant while immediately suspending project access to that participant's contributed document bodies without deleting source ownership or provenance;
+- preserve source-owner control over contributions after membership ends, including later retraction or explicit re-authorization where applicable;
 - archive or delete a project with intelligible lifecycle semantics;
 - use human-readable pickers and invitations rather than copying internal database IDs;
 - expose stable, permission-aware discovery surfaces suitable for later agent retrieval;
@@ -43,7 +45,7 @@ The current project model proves the relational semantics but still exposes impl
 
 Replace normal manual document-ID entry with a picker/search over the participant's eligible documents.
 
-The final **Link to project** action remains explicit and should state that the project's read audience receives access while ownership and write control remain with the participant.
+The final project-contribution action remains explicit and should state that the project's read audience receives access while ownership and write control remain with the participant. Prefer direct wording such as **Add to project** rather than the current **Review link** label.
 
 Raw document-ID entry may remain as an advanced/debugging path.
 
@@ -66,11 +68,17 @@ For the MVP, single-use invitations with a sensible default expiry are sufficien
 
 The preview should show enough context for an informed decision without exposing the protected corpus: project name and description, inviter/owner, read policy, and basic membership context.
 
+Archiving a project revokes outstanding invitations immediately; they do not revive on unarchive.
+
 ### Membership controls
 
 Provide explicit **Leave project** and authorized **Remove member** actions.
 
-Existing semantics must remain intact: withdrawing membership removes that participant's participant-owned project links while leaving their source artifacts untouched.
+Project membership, document ownership, and contribution presence are independent relationships.
+
+Voluntary leave offers a simple unchecked **Withdraw my contributions from this project** option. If left unchecked, membership ends while existing active contributions remain available to the project; the former member loses project visibility but retains source ownership and owner-side control over those contribution relationships. If checked, those contributions are retracted while the participant-owned source artifacts remain intact.
+
+Removal/kicking is deliberately different. Membership ends immediately and the removed participant's active contribution relationships become `suspended_after_removal`: project access to the document bodies stops, stable document identity and permitted historical metadata/provenance remain, and source ownership is unchanged. The former contributor may later retract the relationship or explicitly re-authorize the same stable contribution without regaining project membership or project visibility.
 
 ## 2. Give projects a real lifecycle
 
@@ -90,23 +98,19 @@ Project deletion should initially remain owner-only unless a later governance mo
 
 ### Archive
 
-Support an inactive/read-only archived state for completed projects whose corpus and provenance should remain intentionally inspectable.
+Archive is a reversible collaboration freeze, not deletion. Owner and admins may archive and unarchive. Archiving cuts off invitations and forward project mutation while preserving ordinary authorized read/export access, voluntary leave, source-owner retraction, and the ability of authorized owner/admin roles to undo archive.
 
-Archiving is reversible if practical and must not be confused with deletion.
+Do not maintain a competing lifecycle boolean when one canonical project state can express the same fact.
 
-### Delete and retain the white dwarf
+### Scheduled deletion and shell
 
-Project deletion terminates the active collaboration.
+Project deletion is explicit and should not immediately destroy the project. Schedule deletion with a short grace period (initial policy target: three days). During that grace period the project follows ordinary **archived** rules rather than gaining a separate half-active permission model. Cancellation returns it to ordinary archived state; resuming collaboration still requires explicit unarchive.
 
-It should:
+When deletion completes, retain only a minimal historical shell sufficient to establish that the project and its contributions existed. The shell contains no contributed document bodies and confers no permissions. It may retain the stable project ID, final project manifest, project changelog/lifecycle events, former name and essential metadata, lifecycle timestamps, and historical participant/role/contribution references to the extent permitted by the eventual identity/privacy policy.
 
-- invalidate invitations;
-- revoke active project-derived access;
-- remove participant-document project links without touching participant-owned source artifacts;
-- remove project-owned document bodies according to the deletion policy;
-- disable the project as a collaboration space.
+The final manifest contains references/metadata, not copied participant-owned contribution content. Stable project IDs are never reused. A shell cannot be unarchived.
 
-Retain only a minimal historical provenance shell: stable project ID, former name, creation/deletion timestamps, and former member/role information sufficient to resolve historical references. The shell confers no permissions and contains no project document bodies.
+Archival, retraction, and deletion can prevent future Loom-mediated access; they cannot erase information already received by a human or agent while access was valid. This limitation should be disclosed at consequential sharing boundaries.
 
 ## 3. Add project-owned artifacts
 
@@ -189,7 +193,7 @@ At minimum, Loom needs cheap structured discovery for:
 
 A document may appear in several discovery surfaces without being duplicated. Manifest visibility must be caller-aware: metadata about inaccessible artifacts must not leak merely because the artifact belongs to a manifest.
 
-Keep the first representation deterministic and inspectable: IDs, titles, kinds, paths, ownership/provenance, compact descriptions where available, and retrieval references. Retrieval of the manifest must not load every full document body.
+Keep the first representation deterministic and inspectable: stable IDs, titles, kinds, paths where permitted, ownership/provenance, contribution state, compact descriptions where available, and retrieval references. Retrieval of the manifest must not load every full document body.
 
 AI-assisted manifest upkeep may later propose descriptions, tags, classifications, or membership, but the manifest structure itself must work without AI and remain editable/portable.
 
@@ -203,7 +207,7 @@ Define a stable read-oriented protocol through which an authorized caller can:
 - retrieve the discovery surface it is permitted to see;
 - fetch permitted artifacts by stable reference;
 - distinguish participant-owned from project-owned material;
-- observe provenance and relevant revision metadata;
+- observe provenance, contribution state, and relevant revision metadata;
 - receive no hidden/private metadata outside its grants.
 
 Do not implement arbitrary agent write access merely to complete this section. Bounded write capabilities, explicit agent credentials, activity logs, and richer authorization can follow once the retrieval model has been exercised by a real client.
