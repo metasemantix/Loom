@@ -88,6 +88,18 @@ human ↔ human interaction, if wanted
 
 The system should make increasing autonomy possible without making it mandatory.
 
+### Context is not authority
+
+What an agent can observe, what may influence its reasoning, and what it is authorized to do are separate concerns.
+
+A document becoming available to an agent does not grant that document authority to issue instructions. Likewise, permission to read an artifact does not imply permission to modify it, act on its contents, disclose it elsewhere, or make commitments on its owner's behalf.
+
+Agent authority should derive from explicit human-controlled grants and remain bounded independently of model behavior or retrieved context. Where useful, authority can be narrowed by object, operation, purpose, duration, client, or agent instance.
+
+Loom should make it possible to inspect why an agent was permitted to perform an action and to distinguish an agent's proposal from an authoritative change to shared state.
+
+Context may influence reasoning. It should not determine authority.
+
 ## Memory without rewriting history
 
 Useful coordination requires persistent state. Otherwise every interaction has to reconstruct who participated, what was established, what failed, what was corrected, what remains uncertain, and which artifacts were exchanged.
