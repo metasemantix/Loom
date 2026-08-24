@@ -67,3 +67,4 @@ data and are not recorded here.
 - Added explicit ownerless archived-project recovery: after a former owner is finalized, an existing admin may deliberately become owner while unarchiving; ordinary members cannot claim ownership and active ownerless projects remain impossible.
 - Separated ownerless recovery from ordinary unarchive into an explicit admin-only recovery action, so an unarchive request can never implicitly claim ownership.
 - Made the stored deletion deadline the immediate logical content-access boundary and increased scheduled cleanup frequency to once per minute.
+- Made invitations created by a participant logically unavailable at that participant’s deletion deadline, including commit-time acceptance/decline guards before physical revocation.
