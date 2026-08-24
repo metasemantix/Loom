@@ -87,14 +87,20 @@ export default {
     const contextMatch = path.match(/^\/participants\/(par_[a-z0-9]+)\/context\.(json|md)$/);
     const principal = await principalFor(request, env);
     if (contextMatch && request.method === "GET") {
+      if (principal?.accountState === "deletion_pending" && principal.deletionDueAt && principal.deletionDueAt <= new Date().toISOString()) return problem(410, "account_deletion_due", "The account deletion deadline has passed");
       if (principal?.accountState === "deletion_pending") return problem(423, "account_deletion_pending", "This account is frozen while deletion is pending");
       return context(request, env, contextMatch[1], contextMatch[2] as "json" | "md", principal);
     }
     if (!principal) return request.method === "GET" && path === "/me" ? Response.redirect(`${url.origin}/login`, 302) : problem(401, "authentication_required", "Sign in is required");
     if (["POST", "PUT", "DELETE"].includes(request.method) && !requireSameOrigin(request)) return problem(403, "invalid_origin", "A same-origin request is required");
-    if (request.method === "GET" && path === "/api/me/export") return exportSpace(env, principal);
     if (request.method === "GET" && path === "/api/me/account-lifecycle") return accountLifecycle(env, principal);
     if (request.method === "POST" && path === "/api/me/account-deletion/cancel") return cancelDeletion(env, principal);
+    const deletionDue = principal.accountState === "deletion_pending" && !!principal.deletionDueAt && principal.deletionDueAt <= new Date().toISOString();
+    if (deletionDue) {
+      if (request.method === "GET" && ["/me", "/control-room", "/account-deletion"].includes(path)) return deletionPage();
+      return problem(410, "account_deletion_due", "The account deletion deadline has passed");
+    }
+    if (request.method === "GET" && path === "/api/me/export") return exportSpace(env, principal);
     if (principal.accountState === "deletion_pending") {
       if (request.method === "GET" && ["/me", "/control-room", "/account-deletion"].includes(path)) return deletionPage();
       return problem(423, "account_deletion_pending", "This account is frozen while deletion is pending");
