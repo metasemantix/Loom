@@ -63,3 +63,4 @@ data and are not recorded here.
 - Added centralized pending-account mutation gating and a retry-safe Cloudflare scheduled finalizer that destroys participant content/authentication data, revokes invitations, removes memberships, and preserves unavailable contribution provenance.
 - Hardened the frozen grace period against owner-authenticated context/read bypasses while preserving ordinary public reads for other callers.
 - Reduced finalized participant tombstones to stable participant/provenance identity and finalization state, added ordinary project departure history, and made provider re-registration and provenance-collision handling safe.
+- Preserved the owned-project deletion prerequisite during grace by blocking unarchive while the current owner is deletion-pending, and rebuilt participant references with D1-supported deferred foreign-key migrations.

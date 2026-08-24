@@ -395,6 +395,7 @@ describe("browser UI", () => {
   it("preserves compact project administration and an intact picker during link confirmation", async () => {
     const alice=await participant("alice"),html=await SELF.fetch(`${origin}/projects`,{headers:{cookie:alice.cookie}}).then(r=>r.text());
     expect(html).toContain("Archive project");
+    expect(html).toContain("else if(j.canUnarchive)");expect(html).toContain("cannot be unarchived while its owner has account deletion pending");
     expect(html).toContain("p.status==='active'&&p.role==='owner'");
     expect(html).toContain("j.canAdminister&&p.status==='active'");
     expect(html).toContain("Their contributed content will become unavailable, while contribution history remains.");
@@ -450,7 +451,7 @@ describe("browser UI", () => {
     const fetch = async (url: string, options: { method?: string } = {}) => {
       requests.push({ url, method: options.method });
       if (url === "/api/projects/archived-project/unarchive") return { ok: true, json: async () => ({}) };
-      return { ok: true, json: async () => ({ project, canAdminister: true, members: [], documents: [], events: [], documentsHiddenFromHumans: false }) };
+      return { ok: true, json: async () => ({ project, canAdminister: true, canUnarchive: true, members: [], documents: [], events: [], documentsHiddenFromHumans: false }) };
     };
     const { openProject } = new Function("document", "fetch", "URL", "location", "navigator", browserProgram)(document, fetch, URL, { origin }, {});
     const card = new BrowserElement("article"), toggle = new BrowserElement("button"); toggle.textContent = "Show details"; card.append(toggle);
@@ -498,12 +499,13 @@ describe("browser UI", () => {
 
 describe("scheduled account lifecycle", () => {
   it("blocks unresolved ownership, requires exact confirmation, freezes immediately, and cancels intact", async () => {
-    const alice=await participant("alice"), documentId=await create(alice.cookie), publicDocumentId=await create(alice.cookie,"public");
+    const alice=await participant("alice"),bob=await participant("graceadmin"),documentId=await create(alice.cookie), publicDocumentId=await create(alice.cookie,"public");
     const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Needs a decision",readAudience:"members_and_agents"})}).then(r=>r.json<any>());
     const schedule=(name:string)=>SELF.fetch(`${origin}/api/me/account-deletion`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:name})});
     expect((await schedule("wrong")).status).toBe(400);
     const blocked=await schedule("User alice");expect(blocked.status).toBe(409);expect((await blocked.json<any>()).unresolvedOwnedProjects).toEqual([expect.objectContaining({id:made.project.id,name:"Needs a decision"})]);
     expect((await env.DB.prepare(`SELECT count(*) count FROM project_members WHERE project_id=? AND role='owner'`).bind(made.project.id).first<any>()).count).toBe(1);
+    await invite(made.project.id,alice,bob);await SELF.fetch(`${origin}/api/projects/${made.project.id}/members/${bob.id}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({role:"admin"})});
     await SELF.fetch(`${origin}/api/projects/${made.project.id}/archive`,{method:"POST",headers:{cookie:alice.cookie,origin}});
     const before=Date.now(),scheduled=await schedule("User alice"),after=Date.now();expect(scheduled.status).toBe(201);
     const lifecycle=await env.DB.prepare(`SELECT account_state,deletion_due_at FROM participants WHERE id=?`).bind(alice.id).first<any>();
@@ -513,8 +515,11 @@ describe("scheduled account lifecycle", () => {
     const publicContext=await SELF.fetch(`${origin}/participants/${alice.id}/context.json`).then(r=>r.json<any>());expect(publicContext.documents.map((d:any)=>d.id)).toEqual([publicDocumentId]);
     expect((await SELF.fetch(`${origin}/api/me/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"blocked"})})).status).toBe(423);
     expect((await SELF.fetch(`${origin}/api/me/export`,{headers:{cookie:alice.cookie}})).status).toBe(200);
+    const blockedUnarchive=await SELF.fetch(`${origin}/api/projects/${made.project.id}/unarchive`,{method:"POST",headers:{cookie:bob.cookie,origin}});expect(blockedUnarchive.status).toBe(409);expect((await blockedUnarchive.json<any>()).error.code).toBe("project_owner_deletion_pending");
+    const frozenProject=await SELF.fetch(`${origin}/api/projects/${made.project.id}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<any>());expect(frozenProject).toMatchObject({canUnarchive:false,unarchiveBlockedReason:"project_owner_deletion_pending"});
     expect((await SELF.fetch(`${origin}/me`,{headers:{cookie:alice.cookie}})).text()).resolves.toContain("Your account is frozen");
     expect((await SELF.fetch(`${origin}/api/me/account-deletion/cancel`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(200);
+    expect((await SELF.fetch(`${origin}/api/projects/${made.project.id}/unarchive`,{method:"POST",headers:{cookie:bob.cookie,origin}})).status).toBe(200);
     expect((await env.DB.prepare(`SELECT account_state FROM participants WHERE id=?`).bind(alice.id).first<any>()).account_state).toBe("active");
     expect(await env.DB.prepare(`SELECT id FROM documents WHERE id=?`).bind(documentId).first()).toBeTruthy();
   });
