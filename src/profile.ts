@@ -7,7 +7,8 @@ export function lookupId(participantId: string): string {
 
 export async function getProfile(env: Env, principal: Principal): Promise<Response> {
   const identities = await env.DB.prepare(`SELECT provider,provider_user_id FROM auth_identities WHERE user_id=? ORDER BY provider`).bind(principal.userId).all();
-  return json({ participant: { id: principal.participantId, displayName: principal.displayName, lookupId: lookupId(principal.participantId) }, identities: identities.results });
+  const participant = await env.DB.prepare(`SELECT provenance_identifier FROM participants WHERE id=?`).bind(principal.participantId).first<{provenance_identifier:string}>();
+  return json({ participant: { id: principal.participantId, displayName: principal.displayName, lookupId: lookupId(principal.participantId), provenanceIdentifier: participant?.provenance_identifier }, identities: identities.results });
 }
 
 export async function updateProfile(request: Request, env: Env, principal: Principal): Promise<Response> {

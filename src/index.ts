@@ -6,6 +6,8 @@ import { exportSpace } from "./export";
 import { controlRoomPage, documentPage, invitationPage, loginPage, projectsPage, spacePage } from "./ui";
 import { getProfile, updateProfile } from "./profile";
 import { changeRole, createInvitation, createProject, getProject, linkDocument, listOwnedContributions, listProjects, previewInvitation, reauthorizeContribution, removeMember, respondInvitation, revokeInvitation, setProjectLifecycle, transferOwnership, unlinkDocument, updateProject } from "./projects";
+import { accountLifecycle, cancelDeletion, finalizeDueAccounts, provenanceIdentifier, scheduleDeletion } from "./accounts";
+import { deletionPage } from "./ui";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -53,7 +55,7 @@ async function discordCallback(request: Request, env: Env): Promise<Response> {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO users(id,display_name,created_at) VALUES(?,?,?)`).bind(userId, discord.global_name || discord.username, now),
       env.DB.prepare(`INSERT INTO auth_identities(id,user_id,provider,provider_user_id,created_at) VALUES(?,?,'discord',?,?)`).bind(opaque("idn"), userId, discord.id, now),
-      env.DB.prepare(`INSERT INTO participants(id,user_id,public_slug,created_at) VALUES(?,?,?,?)`).bind(participantId, userId, participantId, now),
+      env.DB.prepare(`INSERT INTO participants(id,user_id,public_slug,created_at,provenance_identifier) VALUES(?,?,?,?,?)`).bind(participantId, userId, participantId, now, provenanceIdentifier()),
     ]);
     identity = { user_id: userId };
   }
@@ -79,19 +81,27 @@ export default {
     const principal = await principalFor(request, env);
     if (contextMatch && request.method === "GET") return context(request, env, contextMatch[1], contextMatch[2] as "json" | "md", principal);
     if (!principal) return request.method === "GET" && path === "/me" ? Response.redirect(`${url.origin}/login`, 302) : problem(401, "authentication_required", "Sign in is required");
+    if (["POST", "PUT", "DELETE"].includes(request.method) && !requireSameOrigin(request)) return problem(403, "invalid_origin", "A same-origin request is required");
+    if (request.method === "GET" && path === "/api/me/export") return exportSpace(env, principal);
+    if (request.method === "GET" && path === "/api/me/account-lifecycle") return accountLifecycle(env, principal);
+    if (request.method === "POST" && path === "/api/me/account-deletion/cancel") return cancelDeletion(env, principal);
+    if (principal.accountState === "deletion_pending") {
+      if (request.method === "GET" && ["/me", "/control-room", "/account-deletion"].includes(path)) return deletionPage();
+      return problem(423, "account_deletion_pending", "This account is frozen while deletion is pending");
+    }
+    if (request.method === "GET" && path === "/account-deletion") return deletionPage();
+    if (request.method === "POST" && path === "/api/me/account-deletion") return scheduleDeletion(request, env, principal);
     if (request.method === "GET" && path === "/me") return spacePage(principal.displayName, principal.participantId);
     if (request.method === "GET" && path === "/control-room") return controlRoomPage();
     if (request.method === "GET" && path === "/projects") return projectsPage();
     const humanDocumentMatch = path.match(/^\/documents\/(doc_[a-z0-9]+)$/);
     if (humanDocumentMatch && request.method === "GET") return documentPage(humanDocumentMatch[1], url.searchParams.get("project"));
     const declineMatch = path.match(/^\/api\/invitations\/(inv_[a-z0-9]+)\/decline$/);
-    if (request.method === "GET" && path === "/api/me/export") return exportSpace(env, principal);
     if (request.method === "GET" && path === "/api/me") return json({ user: { id: principal.userId, displayName: principal.displayName }, participant: { id: principal.participantId } });
     if (request.method === "GET" && path === "/api/me/profile") return getProfile(env, principal);
     if (request.method === "GET" && path === "/api/me/documents") return listDocuments(env, principal);
     const readMatch = path.match(/^\/api\/documents\/(doc_[a-z0-9]+)$/);
     if (readMatch && request.method === "GET") return readDocument(env, principal, readMatch[1], url.searchParams.get("project") ?? undefined);
-    if (["POST", "PUT", "DELETE"].includes(request.method) && !requireSameOrigin(request)) return problem(403, "invalid_origin", "A same-origin request is required");
     if (invitationApiMatch && request.method === "POST") return respondInvitation(env, principal, invitationApiMatch[1], "accept");
     if (declineMatch && request.method === "POST") return respondInvitation(env, principal, declineMatch[1], "decline");
     if (request.method === "PUT" && path === "/api/me/profile") return updateProfile(request, env, principal);
@@ -129,4 +139,5 @@ export default {
     if (archiveMatch && request.method === "POST") return setProjectLifecycle(env, principal, archiveMatch[1], archiveMatch[2] === "archive" ? "archived" : "active");
     return problem(404, "not_found", "Route not found");
   },
+  async scheduled(_controller:ScheduledController,env:Env):Promise<void>{await finalizeDueAccounts(env)},
 } satisfies ExportedHandler<Env>;

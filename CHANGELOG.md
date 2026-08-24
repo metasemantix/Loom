@@ -55,3 +55,9 @@ data and are not recorded here.
   request.
 - Participant ownership is resolved from server-side session state rather than
   client-supplied participant identifiers.
+
+## Account lifecycle
+
+- Added immutable human-readable participant provenance identifiers and minimal former-user tombstones.
+- Added informed account-deletion scheduling with owned-project prerequisites, a configurable 72-hour frozen grace period, export and cancellation access, and a countdown UI.
+- Added centralized pending-account mutation gating and a retry-safe Cloudflare scheduled finalizer that destroys participant content/authentication data, revokes invitations, removes memberships, and preserves unavailable contribution provenance.

@@ -12,6 +12,12 @@
     }
   ],
   "vars": {
-    "DISCORD_REDIRECT_URI": "http://localhost:8787/auth/discord/callback"
+    "DISCORD_REDIRECT_URI": "http://localhost:8787/auth/discord/callback",
+    "ACCOUNT_DELETION_GRACE_SECONDS": "259200"
+  },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
   }
 }

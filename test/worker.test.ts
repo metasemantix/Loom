@@ -13,7 +13,7 @@ async function participant(suffix: string): Promise<{ id: string; userId: string
   const now = new Date().toISOString(), user = `usr_${suffix}`, id = `par_${suffix}`, token = `session-${suffix}`;
   await env.DB.batch([
     env.DB.prepare("INSERT INTO users(id,display_name,created_at) VALUES(?,?,?)").bind(user, `User ${suffix}`, now),
-    env.DB.prepare("INSERT INTO participants(id,user_id,public_slug,created_at) VALUES(?,?,?,?)").bind(id, user, id, now),
+    env.DB.prepare("INSERT INTO participants(id,user_id,public_slug,created_at,provenance_identifier) VALUES(?,?,?,?,?)").bind(id, user, id, now, `test-person-${suffix}`),
     env.DB.prepare("INSERT INTO sessions(id,user_id,secret_hash,expires_at,created_at) VALUES(?,?,?,?,?)").bind(`sid_${suffix}`, user, await sha256(token), new Date(Date.now() + 60_000).toISOString(), now),
   ]);
   return { id, userId: user, cookie: `loom_session=${token}` };
@@ -41,7 +41,7 @@ async function zipFiles(response: Response): Promise<Map<string, string>> {
 }
 
 beforeEach(async () => {
-  await env.DB.exec("DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
+  await env.DB.exec("DELETE FROM account_events; DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
 });
 
 async function invite(projectId:string, inviter:{cookie:string}, recipient:{cookie:string}) {
@@ -107,7 +107,7 @@ describe("Control Room identity", () => {
     const before=await SELF.fetch(`${origin}/api/me/profile`,{headers:{cookie:alice.cookie}}).then(r=>r.json<{participant:{id:string;lookupId:string}}>())
     expect((await SELF.fetch(`${origin}/api/me/profile`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:"Alice Loom"})})).status).toBe(200);
     const after=await SELF.fetch(`${origin}/api/me/profile`,{headers:{cookie:alice.cookie}}).then(r=>r.json<{participant:{id:string;displayName:string;lookupId:string}}>())
-    expect(after.participant).toEqual({id:before.participant.id,displayName:"Alice Loom",lookupId:before.participant.lookupId});
+    expect(after.participant).toMatchObject({id:before.participant.id,displayName:"Alice Loom",lookupId:before.participant.lookupId});
     expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`)).json().then((j:any)=>j.participant.displayName)).resolves.toBe("Alice Loom");
     await SELF.fetch(`${origin}/api/me/profile`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:"Bob Loom"})});
     const history=await SELF.fetch(`${origin}/api/me/documents/${id}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(history.versions[0]).toMatchObject({actor_id:alice.userId,actor_display_name:"Alice Loom"});
@@ -493,5 +493,46 @@ describe("browser UI", () => {
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("http://localhost:8787/auth/discord");
     expect(response.headers.get("set-cookie")).toBeNull();
+  });
+});
+
+describe("scheduled account lifecycle", () => {
+  it("blocks unresolved ownership, requires exact confirmation, freezes immediately, and cancels intact", async () => {
+    const alice=await participant("alice"), documentId=await create(alice.cookie);
+    const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Needs a decision",readAudience:"members_and_agents"})}).then(r=>r.json<any>());
+    const schedule=(name:string)=>SELF.fetch(`${origin}/api/me/account-deletion`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:name})});
+    expect((await schedule("wrong")).status).toBe(400);
+    const blocked=await schedule("User alice");expect(blocked.status).toBe(409);expect((await blocked.json<any>()).unresolvedOwnedProjects).toEqual([expect.objectContaining({id:made.project.id,name:"Needs a decision"})]);
+    expect((await env.DB.prepare(`SELECT count(*) count FROM project_members WHERE project_id=? AND role='owner'`).bind(made.project.id).first<any>()).count).toBe(1);
+    await SELF.fetch(`${origin}/api/projects/${made.project.id}/archive`,{method:"POST",headers:{cookie:alice.cookie,origin}});
+    const before=Date.now(),scheduled=await schedule("User alice"),after=Date.now();expect(scheduled.status).toBe(201);
+    const lifecycle=await env.DB.prepare(`SELECT account_state,deletion_due_at FROM participants WHERE id=?`).bind(alice.id).first<any>();
+    expect(lifecycle.account_state).toBe("deletion_pending");expect(new Date(lifecycle.deletion_due_at).getTime()).toBeGreaterThanOrEqual(before+259200000);expect(new Date(lifecycle.deletion_due_at).getTime()).toBeLessThanOrEqual(after+259200000);
+    expect((await SELF.fetch(`${origin}/api/me/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"blocked"})})).status).toBe(423);
+    expect((await SELF.fetch(`${origin}/api/me/export`,{headers:{cookie:alice.cookie}})).status).toBe(200);
+    expect((await SELF.fetch(`${origin}/me`,{headers:{cookie:alice.cookie}})).text()).resolves.toContain("Your account is frozen");
+    expect((await SELF.fetch(`${origin}/api/me/account-deletion/cancel`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(200);
+    expect((await env.DB.prepare(`SELECT account_state FROM participants WHERE id=?`).bind(alice.id).first<any>()).account_state).toBe("active");
+    expect(await env.DB.prepare(`SELECT id FROM documents WHERE id=?`).bind(documentId).first()).toBeTruthy();
+  });
+
+  it("rejects late cancellation and finalizes irreversibly and idempotently", async () => {
+    const alice=await participant("delete-me"),bob=await participant("bob-stays"),documentId=await create(alice.cookie,"public");
+    const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Archive",readAudience:"members_and_agents"})}).then(r=>r.json<any>());await invite(made.project.id,alice,bob);
+    await SELF.fetch(`${origin}/api/projects/${made.project.id}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})});
+    const invitation=await SELF.fetch(`${origin}/api/projects/${made.project.id}/invitations`,{method:"POST",headers:{cookie:alice.cookie,origin}}).then(r=>r.json<any>());
+    await SELF.fetch(`${origin}/api/projects/${made.project.id}/archive`,{method:"POST",headers:{cookie:alice.cookie,origin}});
+    await SELF.fetch(`${origin}/api/me/account-deletion`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:"User delete-me"})});
+    const due="2000-01-01T00:00:00.000Z";await env.DB.prepare(`UPDATE participants SET deletion_due_at=? WHERE id=?`).bind(due,alice.id).run();
+    expect((await SELF.fetch(`${origin}/api/me/account-deletion/cancel`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(409);
+    const {finalizeDueAccounts}=await import("../src/accounts");await finalizeDueAccounts(env,new Date("2026-01-01T00:00:00.000Z"));await finalizeDueAccounts(env,new Date("2026-01-01T00:00:00.000Z"));
+    const tombstone=await env.DB.prepare(`SELECT p.id,p.account_state,p.provenance_identifier,p.deletion_finalized_at,u.display_name FROM participants p JOIN users u ON u.id=p.user_id WHERE p.id=?`).bind(alice.id).first<any>();expect(tombstone).toMatchObject({id:alice.id,account_state:"deleted",display_name:"former user"});expect(tombstone.provenance_identifier).toBeTruthy();
+    expect(await env.DB.prepare(`SELECT id FROM documents WHERE id=?`).bind(documentId).first()).toBeNull();expect((await env.DB.prepare(`SELECT count(*) count FROM document_versions WHERE document_id=?`).bind(documentId).first<any>()).count).toBe(0);
+    expect((await SELF.fetch(`${origin}/api/documents/${documentId}?project=${made.project.id}`,{headers:{cookie:bob.cookie}})).status).toBe(404);
+    expect((await env.DB.prepare(`SELECT state,tombstone_title FROM project_documents WHERE document_id=?`).bind(documentId).first<any>())).toMatchObject({state:"retracted",tombstone_title:"Notes"});
+    expect(await env.DB.prepare(`SELECT id FROM auth_identities WHERE user_id=?`).bind(alice.userId).first()).toBeNull();expect(await env.DB.prepare(`SELECT id FROM sessions WHERE user_id=?`).bind(alice.userId).first()).toBeNull();
+    expect(await env.DB.prepare(`SELECT participant_id FROM project_members WHERE project_id=? AND participant_id=?`).bind(made.project.id,alice.id).first()).toBeNull();expect(await env.DB.prepare(`SELECT participant_id FROM project_members WHERE project_id=? AND participant_id=?`).bind(made.project.id,bob.id).first()).toBeTruthy();
+    expect((await env.DB.prepare(`SELECT status FROM project_invitations WHERE id=?`).bind(invitation.invitation.id).first<any>()).status).toBe("revoked");
+    expect((await env.DB.prepare(`SELECT count(*) count FROM account_events WHERE participant_id=? AND event_type='account_deletion_finalized'`).bind(alice.id).first<any>()).count).toBe(1);
   });
 });
