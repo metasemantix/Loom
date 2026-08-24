@@ -51,13 +51,20 @@ async function discordCallback(request: Request, env: Env): Promise<Response> {
   let identity = await env.DB.prepare(`SELECT user_id FROM auth_identities WHERE provider='discord' AND provider_user_id=?`).bind(discord.id).first<{ user_id: string }>();
   const now = new Date().toISOString();
   if (!identity) {
-    const userId = opaque("usr"), participantId = opaque("par");
-    await env.DB.batch([
-      env.DB.prepare(`INSERT INTO users(id,display_name,created_at) VALUES(?,?,?)`).bind(userId, discord.global_name || discord.username, now),
-      env.DB.prepare(`INSERT INTO auth_identities(id,user_id,provider,provider_user_id,created_at) VALUES(?,?,'discord',?,?)`).bind(opaque("idn"), userId, discord.id, now),
-      env.DB.prepare(`INSERT INTO participants(id,user_id,public_slug,created_at,provenance_identifier) VALUES(?,?,?,?,?)`).bind(participantId, userId, participantId, now, provenanceIdentifier()),
-    ]);
-    identity = { user_id: userId };
+    for (let attempt=0;attempt<8&&!identity;attempt++) {
+      const userId=opaque("usr"),participantId=opaque("par"),provenance=provenanceIdentifier();
+      try {
+        await env.DB.batch([
+          env.DB.prepare(`INSERT INTO users(id,display_name,created_at) VALUES(?,?,?)`).bind(userId, discord.global_name || discord.username, now),
+          env.DB.prepare(`INSERT INTO auth_identities(id,user_id,provider,provider_user_id,created_at) VALUES(?,?,'discord',?,?)`).bind(opaque("idn"), userId, discord.id, now),
+          env.DB.prepare(`INSERT INTO participants(id,user_id,public_slug,created_at,provenance_identifier) VALUES(?,?,?,?,?)`).bind(participantId, userId, participantId, now, provenance),
+        ]);
+        identity={user_id:userId};
+      } catch(error) {
+        if(!String(error).includes("provenance_identifier")||attempt===7)throw error;
+      }
+    }
+    if(!identity)return problem(503,"identity_creation_failed","A unique Loom identity could not be created");
   }
   const secret = opaque("ses"), sessionId = opaque("sid"), expires = new Date(Date.now() + 30 * 86400_000).toISOString();
   await env.DB.prepare(`INSERT INTO sessions(id,user_id,secret_hash,expires_at,created_at) VALUES(?,?,?,?,?)`).bind(sessionId, identity.user_id, await hashSecret(secret), expires, now).run();
@@ -79,7 +86,10 @@ export default {
     if (invitationApiMatch && request.method === "GET") return previewInvitation(env, invitationApiMatch[1]);
     const contextMatch = path.match(/^\/participants\/(par_[a-z0-9]+)\/context\.(json|md)$/);
     const principal = await principalFor(request, env);
-    if (contextMatch && request.method === "GET") return context(request, env, contextMatch[1], contextMatch[2] as "json" | "md", principal);
+    if (contextMatch && request.method === "GET") {
+      if (principal?.accountState === "deletion_pending") return problem(423, "account_deletion_pending", "This account is frozen while deletion is pending");
+      return context(request, env, contextMatch[1], contextMatch[2] as "json" | "md", principal);
+    }
     if (!principal) return request.method === "GET" && path === "/me" ? Response.redirect(`${url.origin}/login`, 302) : problem(401, "authentication_required", "Sign in is required");
     if (["POST", "PUT", "DELETE"].includes(request.method) && !requireSameOrigin(request)) return problem(403, "invalid_origin", "A same-origin request is required");
     if (request.method === "GET" && path === "/api/me/export") return exportSpace(env, principal);

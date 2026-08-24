@@ -50,10 +50,14 @@ export async function finalizeDueAccounts(env:Env,now=new Date()):Promise<number
 
 async function finalizeAccount(env:Env,participantId:string,userId:string,now:string):Promise<void>{
   const contributions=await env.DB.prepare(`SELECT pd.project_id,pd.document_id,d.title FROM project_documents pd JOIN documents d ON d.id=pd.document_id WHERE pd.source_owner_participant_id=? AND pd.state!='retracted'`).bind(participantId).all<{project_id:string;document_id:string;title:string}>();
-  const statements:D1PreparedStatement[]=[env.DB.prepare(`UPDATE participants SET account_state='deleted',deletion_due_at=NULL,deletion_finalized_at=?,withdrawn_at=? WHERE id=? AND account_state='deletion_pending' AND deletion_due_at<=?`).bind(now,now,participantId,now)];
+  const memberships=await env.DB.prepare(`SELECT project_id,role FROM project_members WHERE participant_id=? ORDER BY project_id`).bind(participantId).all<{project_id:string;role:string}>();
+  const statements:D1PreparedStatement[]=[env.DB.prepare(`UPDATE participants SET account_state='deleted',user_id=NULL,public_slug=NULL,created_at=NULL,withdrawn_at=NULL,deletion_due_at=NULL,deletion_finalized_at=? WHERE id=? AND account_state='deletion_pending' AND deletion_due_at<=?`).bind(now,participantId,now)];
   for(const c of contributions.results)statements.push(
     env.DB.prepare(`UPDATE project_documents SET state='retracted',tombstone_title=?,state_changed_at=?,state_changed_by_participant_id=NULL,state_transition_id=? WHERE project_id=? AND document_id=? AND state!='retracted' AND EXISTS(SELECT 1 FROM participants WHERE id=? AND account_state='deleted' AND deletion_finalized_at=?)`).bind(c.title,now,`account-finalize:${participantId}`,c.project_id,c.document_id,participantId,now),
     env.DB.prepare(`INSERT INTO project_events(id,project_id,event_type,actor_participant_id,details_json,created_at) SELECT ?,?,'contribution_retracted',?, ?,? WHERE changes()=1`).bind(opaque("pev"),c.project_id,participantId,JSON.stringify({documentId:c.document_id}),now)
+  );
+  for(const membership of memberships.results)statements.push(
+    env.DB.prepare(`INSERT OR IGNORE INTO project_events(id,project_id,event_type,actor_participant_id,details_json,created_at) SELECT ?,?,'member_left',?,?,? WHERE EXISTS(SELECT 1 FROM participants WHERE id=? AND account_state='deleted' AND deletion_finalized_at=?) AND EXISTS(SELECT 1 FROM project_members WHERE project_id=? AND participant_id=?)`).bind(`account-departure:${participantId}:${membership.project_id}`,membership.project_id,participantId,JSON.stringify({participantId,withdrawContributions:false}),now,participantId,now,membership.project_id,participantId)
   );
   statements.push(
     env.DB.prepare(`DELETE FROM documents WHERE owner_type='participant' AND owner_id=? AND EXISTS(SELECT 1 FROM participants WHERE id=? AND account_state='deleted' AND deletion_finalized_at=?)`).bind(participantId,participantId,now),
@@ -61,7 +65,7 @@ async function finalizeAccount(env:Env,participantId:string,userId:string,now:st
     env.DB.prepare(`DELETE FROM project_members WHERE participant_id=? AND EXISTS(SELECT 1 FROM participants WHERE id=? AND account_state='deleted')`).bind(participantId,participantId),
     env.DB.prepare(`DELETE FROM sessions WHERE user_id=? AND EXISTS(SELECT 1 FROM participants WHERE id=? AND account_state='deleted')`).bind(userId,participantId),
     env.DB.prepare(`DELETE FROM auth_identities WHERE user_id=? AND EXISTS(SELECT 1 FROM participants WHERE id=? AND account_state='deleted')`).bind(userId,participantId),
-    env.DB.prepare(`UPDATE users SET display_name='former user' WHERE id=? AND EXISTS(SELECT 1 FROM participants WHERE id=? AND account_state='deleted')`).bind(userId,participantId),
+    env.DB.prepare(`DELETE FROM users WHERE id=? AND EXISTS(SELECT 1 FROM participants WHERE id=? AND account_state='deleted')`).bind(userId,participantId),
     env.DB.prepare(`INSERT OR IGNORE INTO account_events(id,participant_id,event_type,details_json,created_at) SELECT ?,?,'account_deletion_finalized','{}',? WHERE EXISTS(SELECT 1 FROM participants WHERE id=? AND account_state='deleted' AND deletion_finalized_at=?)`).bind(`account-finalized:${participantId}`,participantId,now,participantId,now)
   );
   await env.DB.batch(statements);

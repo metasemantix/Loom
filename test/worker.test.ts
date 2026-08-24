@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const origin = "http://example.com";
 
@@ -498,7 +498,7 @@ describe("browser UI", () => {
 
 describe("scheduled account lifecycle", () => {
   it("blocks unresolved ownership, requires exact confirmation, freezes immediately, and cancels intact", async () => {
-    const alice=await participant("alice"), documentId=await create(alice.cookie);
+    const alice=await participant("alice"), documentId=await create(alice.cookie), publicDocumentId=await create(alice.cookie,"public");
     const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Needs a decision",readAudience:"members_and_agents"})}).then(r=>r.json<any>());
     const schedule=(name:string)=>SELF.fetch(`${origin}/api/me/account-deletion`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:name})});
     expect((await schedule("wrong")).status).toBe(400);
@@ -508,6 +508,9 @@ describe("scheduled account lifecycle", () => {
     const before=Date.now(),scheduled=await schedule("User alice"),after=Date.now();expect(scheduled.status).toBe(201);
     const lifecycle=await env.DB.prepare(`SELECT account_state,deletion_due_at FROM participants WHERE id=?`).bind(alice.id).first<any>();
     expect(lifecycle.account_state).toBe("deletion_pending");expect(new Date(lifecycle.deletion_due_at).getTime()).toBeGreaterThanOrEqual(before+259200000);expect(new Date(lifecycle.deletion_due_at).getTime()).toBeLessThanOrEqual(after+259200000);
+    expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`,{headers:{cookie:alice.cookie}})).status).toBe(423);
+    expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.md`,{headers:{cookie:alice.cookie}})).status).toBe(423);
+    const publicContext=await SELF.fetch(`${origin}/participants/${alice.id}/context.json`).then(r=>r.json<any>());expect(publicContext.documents.map((d:any)=>d.id)).toEqual([publicDocumentId]);
     expect((await SELF.fetch(`${origin}/api/me/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"blocked"})})).status).toBe(423);
     expect((await SELF.fetch(`${origin}/api/me/export`,{headers:{cookie:alice.cookie}})).status).toBe(200);
     expect((await SELF.fetch(`${origin}/me`,{headers:{cookie:alice.cookie}})).text()).resolves.toContain("Your account is frozen");
@@ -518,7 +521,9 @@ describe("scheduled account lifecycle", () => {
 
   it("rejects late cancellation and finalizes irreversibly and idempotently", async () => {
     const alice=await participant("delete-me"),bob=await participant("bob-stays"),documentId=await create(alice.cookie,"public");
+    const providerId="reusable-discord-id";await env.DB.prepare(`INSERT INTO auth_identities(id,user_id,provider,provider_user_id,created_at) VALUES('idn_old',?,'discord',?,?)`).bind(alice.userId,providerId,new Date().toISOString()).run();
     const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Archive",readAudience:"members_and_agents"})}).then(r=>r.json<any>());await invite(made.project.id,alice,bob);
+    const adminProject=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Admin departure",readAudience:"members_and_agents"})}).then(r=>r.json<any>());await invite(adminProject.project.id,bob,alice);await SELF.fetch(`${origin}/api/projects/${adminProject.project.id}/members/${alice.id}`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({role:"admin"})});await SELF.fetch(`${origin}/api/projects/${adminProject.project.id}/archive`,{method:"POST",headers:{cookie:bob.cookie,origin}});
     await SELF.fetch(`${origin}/api/projects/${made.project.id}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})});
     const invitation=await SELF.fetch(`${origin}/api/projects/${made.project.id}/invitations`,{method:"POST",headers:{cookie:alice.cookie,origin}}).then(r=>r.json<any>());
     await SELF.fetch(`${origin}/api/projects/${made.project.id}/archive`,{method:"POST",headers:{cookie:alice.cookie,origin}});
@@ -526,7 +531,7 @@ describe("scheduled account lifecycle", () => {
     const due="2000-01-01T00:00:00.000Z";await env.DB.prepare(`UPDATE participants SET deletion_due_at=? WHERE id=?`).bind(due,alice.id).run();
     expect((await SELF.fetch(`${origin}/api/me/account-deletion/cancel`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(409);
     const {finalizeDueAccounts}=await import("../src/accounts");await finalizeDueAccounts(env,new Date("2026-01-01T00:00:00.000Z"));await finalizeDueAccounts(env,new Date("2026-01-01T00:00:00.000Z"));
-    const tombstone=await env.DB.prepare(`SELECT p.id,p.account_state,p.provenance_identifier,p.deletion_finalized_at,u.display_name FROM participants p JOIN users u ON u.id=p.user_id WHERE p.id=?`).bind(alice.id).first<any>();expect(tombstone).toMatchObject({id:alice.id,account_state:"deleted",display_name:"former user"});expect(tombstone.provenance_identifier).toBeTruthy();
+    const tombstone=await env.DB.prepare(`SELECT id,user_id,public_slug,created_at,withdrawn_at,account_state,provenance_identifier,deletion_due_at,deletion_finalized_at FROM participants WHERE id=?`).bind(alice.id).first<any>();expect(tombstone).toMatchObject({id:alice.id,user_id:null,public_slug:null,created_at:null,withdrawn_at:null,account_state:"deleted",deletion_due_at:null});expect(tombstone.provenance_identifier).toBeTruthy();expect(tombstone.deletion_finalized_at).toBeTruthy();expect(await env.DB.prepare(`SELECT id FROM users WHERE id=?`).bind(alice.userId).first()).toBeNull();
     expect(await env.DB.prepare(`SELECT id FROM documents WHERE id=?`).bind(documentId).first()).toBeNull();expect((await env.DB.prepare(`SELECT count(*) count FROM document_versions WHERE document_id=?`).bind(documentId).first<any>()).count).toBe(0);
     expect((await SELF.fetch(`${origin}/api/documents/${documentId}?project=${made.project.id}`,{headers:{cookie:bob.cookie}})).status).toBe(404);
     expect((await env.DB.prepare(`SELECT state,tombstone_title FROM project_documents WHERE document_id=?`).bind(documentId).first<any>())).toMatchObject({state:"retracted",tombstone_title:"Notes"});
@@ -534,5 +539,13 @@ describe("scheduled account lifecycle", () => {
     expect(await env.DB.prepare(`SELECT participant_id FROM project_members WHERE project_id=? AND participant_id=?`).bind(made.project.id,alice.id).first()).toBeNull();expect(await env.DB.prepare(`SELECT participant_id FROM project_members WHERE project_id=? AND participant_id=?`).bind(made.project.id,bob.id).first()).toBeTruthy();
     expect((await env.DB.prepare(`SELECT status FROM project_invitations WHERE id=?`).bind(invitation.invitation.id).first<any>()).status).toBe("revoked");
     expect((await env.DB.prepare(`SELECT count(*) count FROM account_events WHERE participant_id=? AND event_type='account_deletion_finalized'`).bind(alice.id).first<any>()).count).toBe(1);
+    const departure=await env.DB.prepare(`SELECT actor_participant_id,details_json FROM project_events WHERE project_id=? AND event_type='member_left'`).bind(made.project.id).first<any>();expect(departure.actor_participant_id).toBe(alice.id);expect(JSON.parse(departure.details_json)).toEqual({participantId:alice.id,withdrawContributions:false});
+    const adminDeparture=await env.DB.prepare(`SELECT actor_participant_id,details_json FROM project_events WHERE project_id=? AND event_type='member_left'`).bind(adminProject.project.id).first<any>();expect(adminDeparture.actor_participant_id).toBe(alice.id);expect(JSON.parse(adminDeparture.details_json)).toEqual({participantId:alice.id,withdrawContributions:false});
+    const projectView=await SELF.fetch(`${origin}/api/projects/${made.project.id}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<any>());expect(projectView.events).toContainEqual(expect.objectContaining({event_type:"member_left",actor_display_name:`${tombstone.provenance_identifier} (former user)`}));
+    const start=await SELF.fetch(`${origin}/auth/discord`,{redirect:"manual"}),state=/loom_oauth_state=([^;]+)/.exec(start.headers.get("set-cookie")||"")?.[1];expect(state).toBeTruthy();
+    const originalFetch=globalThis.fetch,fetchSpy=vi.spyOn(globalThis,"fetch").mockImplementation(async(input,init)=>{const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;if(url==="https://discord.com/api/oauth2/token")return new Response(JSON.stringify({access_token:"replacement-token"}),{status:200,headers:{"content-type":"application/json"}});if(url==="https://discord.com/api/users/@me")return new Response(JSON.stringify({id:providerId,username:"User delete-me"}),{status:200,headers:{"content-type":"application/json"}});return originalFetch(input as RequestInfo,init)});
+    let callback:Response;try{callback=await SELF.fetch(`${origin}/auth/discord/callback?state=${encodeURIComponent(state!)}&code=new-code`,{headers:{cookie:`loom_oauth_state=${state}`},redirect:"manual"})}finally{fetchSpy.mockRestore()}expect(callback!.status).toBe(302);
+    const replacement=await env.DB.prepare(`SELECT u.id user_id,p.id participant_id,p.provenance_identifier FROM auth_identities i JOIN users u ON u.id=i.user_id JOIN participants p ON p.user_id=u.id WHERE i.provider='discord' AND i.provider_user_id=?`).bind(providerId).first<any>();expect(replacement.user_id).not.toBe(alice.userId);expect(replacement.participant_id).not.toBe(alice.id);expect(replacement.provenance_identifier).not.toBe(tombstone.provenance_identifier);
+    const unchanged=await env.DB.prepare(`SELECT id,user_id,provenance_identifier,account_state FROM participants WHERE id=?`).bind(alice.id).first<any>();expect(unchanged).toEqual({id:alice.id,user_id:null,provenance_identifier:tombstone.provenance_identifier,account_state:"deleted"});
   });
 });

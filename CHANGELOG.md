@@ -61,3 +61,5 @@ data and are not recorded here.
 - Added immutable human-readable participant provenance identifiers and minimal former-user tombstones.
 - Added informed account-deletion scheduling with owned-project prerequisites, a configurable 72-hour frozen grace period, export and cancellation access, and a countdown UI.
 - Added centralized pending-account mutation gating and a retry-safe Cloudflare scheduled finalizer that destroys participant content/authentication data, revokes invitations, removes memberships, and preserves unavailable contribution provenance.
+- Hardened the frozen grace period against owner-authenticated context/read bypasses while preserving ordinary public reads for other callers.
+- Reduced finalized participant tombstones to stable participant/provenance identity and finalization state, added ordinary project departure history, and made provider re-registration and provenance-collision handling safe.
