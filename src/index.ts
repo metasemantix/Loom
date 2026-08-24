@@ -5,7 +5,7 @@ import type { Env } from "./types";
 import { exportSpace } from "./export";
 import { controlRoomPage, documentPage, invitationPage, loginPage, projectsPage, spacePage } from "./ui";
 import { getProfile, updateProfile } from "./profile";
-import { changeRole, createInvitation, createProject, getProject, linkDocument, listOwnedContributions, listProjects, previewInvitation, reauthorizeContribution, removeMember, respondInvitation, revokeInvitation, setProjectLifecycle, transferOwnership, unlinkDocument, updateProject } from "./projects";
+import { changeRole, createInvitation, createProject, getProject, linkDocument, listOwnedContributions, listProjects, previewInvitation, reauthorizeContribution, removeMember, respondInvitation, revokeInvitation, setProjectLifecycle, recoverOwnerlessProject, transferOwnership, unlinkDocument, updateProject } from "./projects";
 import { accountLifecycle, cancelDeletion, finalizeDueAccounts, provenanceIdentifier, scheduleDeletion } from "./accounts";
 import { deletionPage } from "./ui";
 
@@ -147,6 +147,8 @@ export default {
     if (reauthorizeMatch && request.method === "POST") return reauthorizeContribution(env, principal, reauthorizeMatch[1], reauthorizeMatch[2]);
     const archiveMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/(archive|unarchive)$/);
     if (archiveMatch && request.method === "POST") return setProjectLifecycle(env, principal, archiveMatch[1], archiveMatch[2] === "archive" ? "archived" : "active");
+    const recoveryMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/recover$/);
+    if (recoveryMatch && request.method === "POST") return recoverOwnerlessProject(env, principal, recoveryMatch[1]);
     return problem(404, "not_found", "Route not found");
   },
   async scheduled(_controller:ScheduledController,env:Env):Promise<void>{await finalizeDueAccounts(env)},

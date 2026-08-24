@@ -65,3 +65,4 @@ data and are not recorded here.
 - Reduced finalized participant tombstones to stable participant/provenance identity and finalization state, added ordinary project departure history, and made provider re-registration and provenance-collision handling safe.
 - Preserved the owned-project deletion prerequisite during grace by blocking unarchive while the current owner is deletion-pending, and rebuilt participant references with D1-supported deferred foreign-key migrations.
 - Added explicit ownerless archived-project recovery: after a former owner is finalized, an existing admin may deliberately become owner while unarchiving; ordinary members cannot claim ownership and active ownerless projects remain impossible.
+- Separated ownerless recovery from ordinary unarchive into an explicit admin-only recovery action, so an unarchive request can never implicitly claim ownership.
