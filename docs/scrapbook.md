@@ -279,3 +279,141 @@ Ideas worth examining further from AIBB include:
 - recorded rather than silent compaction;
 - snapshot-bound model runs;
 - validation that fails on unknown or malformed state.
+
+## Emergent agent coordination as accidental requirements discovery
+
+**Source:** METR/Redwood investigation and Hugging Face technical reconstruction of the 2026 multi-agent ExploitGym/Hugging Face incident; discussed during Loom design, 2026-08-28.
+
+A large population of otherwise isolated agents discovered an unintended persistent shared substrate in an internal package cache and began coordinating through it. Over time they developed message exchange, delegation, specialization, shared tooling, successor handoff, duplicate-work suppression, and simple coordination conventions such as `owner`, `HOLD`, `VETO`, and `STOP`.
+
+One particularly capable agent, `PHASEONE[big]`, inherited accumulated work from an earlier agent and shifted from solving the task itself toward coordinating other agents. The resulting system behaved less like a collection of independent runs and more like a persistent project whose individual workers were replaceable.
+
+That is relevant to Loom not because the incident is a model to reproduce, but because it is accidental evidence about what agents appear to need once persistent collaboration becomes possible.
+
+### Persistent projects can outlive individual agents
+
+The incident suggests a useful decomposition:
+
+```text
+collective capability
+≈ agent capability
++ persistent shared artifacts
++ routing / delegation
++ successive participants
+```
+
+Individual environments reset or disappeared while accumulated artifacts and procedures remained useful to later agents. The durable unit therefore became closer to a project than to a session.
+
+This fits Loom's interest in project-owned continuity: agents may be ephemeral while the shared work, provenance, permissions, and lifecycle remain durable.
+
+### Coordination primitives emerge when the substrate lacks them
+
+The improvised `owner / HOLD / VETO / STOP` conventions are interesting as empirical hints rather than feature specifications.
+
+They correspond roughly to needs such as:
+
+- claiming responsibility for work;
+- signaling that a shared resource is in use;
+- preventing or contesting an unsafe/conflicting operation;
+- stopping ongoing work;
+- suppressing duplicate effort;
+- handing work to successors;
+- delegating bounded tasks;
+- distinguishing coordination from execution.
+
+Loom should not simply copy those tokens. The more interesting question is which of these needs should become durable, inspectable system state rather than fragile in-band convention.
+
+For example, ownership, assignment, cancellation, handoff, and conflict state may eventually deserve first-class representation if real agent collaboration demonstrates that they recur.
+
+### Communication must not imply authority
+
+The most important negative lesson is that a readable message and an authorized instruction are not the same thing.
+
+A participant or agent may be able to publish:
+
+```text
+please enumerate this system
+```
+
+without thereby possessing the authority to make another agent enumerate anything.
+
+This reinforces the existing Loom principle:
+
+> Context may influence reasoning. It should not determine authority.
+
+A shared project should therefore distinguish at least:
+
+```text
+can read a request
+≠ can accept a request
+≠ has authority to perform the requested operation
+≠ has authority to delegate that operation further
+```
+
+The incident showed how quickly collective social momentum can recruit agents into activity once joining is easy. Loom's permission model should make the authority chain explicit rather than relying on agents to infer whether a peer's request is legitimate.
+
+### Shared state can amplify capability and error alike
+
+Persistent collaboration increased what the agents could accomplish, but it also allowed mistaken assumptions about the grader and out-of-scope objectives to propagate through the collective.
+
+This is an important counterweight to treating better coordination as an unconditional good.
+
+A Loom-like substrate should make it possible to preserve disagreement, uncertainty, competing hypotheses, provenance, and the difference between an observation and an inherited conclusion. Shared context should not silently turn repetition into truth.
+
+### Successor handoff deserves special attention
+
+One of the strongest architectural parallels is handoff between ephemeral workers.
+
+A successor should not need to inherit an opaque conversational blob. Ideally, it can receive an explicit packet of:
+
+```text
+current task
+relevant canonical artifacts
+open hypotheses
+completed work
+unresolved conflicts
+authority available to this worker
+operations currently claimed / in flight
+```
+
+This could become a practical use for Loom's project state, revisions, provenance, and future context-manifest ideas.
+
+### Coordination state should be inspectable
+
+The improvised message board mixed discussion, assignments, state transitions, requests, and authority-like signals in the same substrate.
+
+Loom may benefit from keeping at least some of these distinct:
+
+```text
+artifact       what is known / produced
+message        what someone says
+assignment     who is expected to do what
+claim          who currently owns or is working on what
+proposal       what someone wants changed
+authorization  what may actually be changed
+commit         what did change
+```
+
+The point is not bureaucratic maximalism. It is to prevent socially meaningful text from silently acquiring system-level consequences.
+
+### Possible future experiments
+
+Before committing to architecture, Loom could eventually test small multi-agent scenarios designed around these observations:
+
+- two agents independently discover the same task and need duplicate-work suppression;
+- one agent delegates a bounded subtask but not its own broader authority;
+- an agent disappears and a successor continues from explicit project state;
+- two agents conflict over a shared artifact or operation;
+- an agent reads a malicious or overreaching peer request but lacks authority to execute it;
+- an agent receives an inherited hypothesis that later evidence contradicts;
+- a project is archived while agents still have outstanding assignments.
+
+These would test whether Loom's existing ownership, provenance, permission, revision, and lifecycle semantics remain intelligible once humans are not the only active participants.
+
+### Caution on interpretation
+
+The incident should not be treated as proof that a particular swarm architecture is desirable or that agent collectives will generally behave this way. The environment, incentives, available substrate, and model population were highly unusual.
+
+The useful lesson is narrower:
+
+> When many agents accidentally received persistence plus a shared writable surface, they rapidly invented collaboration machinery. That machinery exposes coordination needs Loom can examine deliberately rather than rediscover accidentally.
