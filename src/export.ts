@@ -1,4 +1,5 @@
 import type { Env, Principal } from "./types";
+import { problem } from "./http";
 
 interface ExportRow {
   document_id: string;
@@ -68,6 +69,8 @@ function extension(contentType: string): string {
 }
 
 export async function exportSpace(env: Env, principal: Principal): Promise<Response> {
+  const account=await env.DB.prepare(`SELECT account_state,deletion_due_at FROM participants WHERE id=?`).bind(principal.participantId).first<{account_state:string;deletion_due_at:string|null}>();
+  if(!account||account.account_state==='deleted'||account.account_state==='deletion_pending'&&!!account.deletion_due_at&&account.deletion_due_at<=new Date().toISOString())return problem(410,"account_deletion_due","The account deletion deadline has passed");
   const result = await env.DB.prepare(`
     SELECT d.id document_id,d.kind,d.title,d.logical_path,d.visibility,d.original_filename,d.original_content_type,d.created_at document_created_at,
       d.current_version_id,v.id version_id,v.version_number,v.content,v.content_type,

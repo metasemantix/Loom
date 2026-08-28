@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const origin = "http://example.com";
 
@@ -13,7 +13,7 @@ async function participant(suffix: string): Promise<{ id: string; userId: string
   const now = new Date().toISOString(), user = `usr_${suffix}`, id = `par_${suffix}`, token = `session-${suffix}`;
   await env.DB.batch([
     env.DB.prepare("INSERT INTO users(id,display_name,created_at) VALUES(?,?,?)").bind(user, `User ${suffix}`, now),
-    env.DB.prepare("INSERT INTO participants(id,user_id,public_slug,created_at) VALUES(?,?,?,?)").bind(id, user, id, now),
+    env.DB.prepare("INSERT INTO participants(id,user_id,public_slug,created_at,provenance_identifier) VALUES(?,?,?,?,?)").bind(id, user, id, now, `test-person-${suffix}`),
     env.DB.prepare("INSERT INTO sessions(id,user_id,secret_hash,expires_at,created_at) VALUES(?,?,?,?,?)").bind(`sid_${suffix}`, user, await sha256(token), new Date(Date.now() + 60_000).toISOString(), now),
   ]);
   return { id, userId: user, cookie: `loom_session=${token}` };
@@ -41,7 +41,7 @@ async function zipFiles(response: Response): Promise<Map<string, string>> {
 }
 
 beforeEach(async () => {
-  await env.DB.exec("DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
+  await env.DB.exec("DELETE FROM account_events; DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
 });
 
 async function invite(projectId:string, inviter:{cookie:string}, recipient:{cookie:string}) {
@@ -107,7 +107,7 @@ describe("Control Room identity", () => {
     const before=await SELF.fetch(`${origin}/api/me/profile`,{headers:{cookie:alice.cookie}}).then(r=>r.json<{participant:{id:string;lookupId:string}}>())
     expect((await SELF.fetch(`${origin}/api/me/profile`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:"Alice Loom"})})).status).toBe(200);
     const after=await SELF.fetch(`${origin}/api/me/profile`,{headers:{cookie:alice.cookie}}).then(r=>r.json<{participant:{id:string;displayName:string;lookupId:string}}>())
-    expect(after.participant).toEqual({id:before.participant.id,displayName:"Alice Loom",lookupId:before.participant.lookupId});
+    expect(after.participant).toMatchObject({id:before.participant.id,displayName:"Alice Loom",lookupId:before.participant.lookupId});
     expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`)).json().then((j:any)=>j.participant.displayName)).resolves.toBe("Alice Loom");
     await SELF.fetch(`${origin}/api/me/profile`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:"Bob Loom"})});
     const history=await SELF.fetch(`${origin}/api/me/documents/${id}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(history.versions[0]).toMatchObject({actor_id:alice.userId,actor_display_name:"Alice Loom"});
@@ -395,6 +395,7 @@ describe("browser UI", () => {
   it("preserves compact project administration and an intact picker during link confirmation", async () => {
     const alice=await participant("alice"),html=await SELF.fetch(`${origin}/projects`,{headers:{cookie:alice.cookie}}).then(r=>r.text());
     expect(html).toContain("Archive project");
+    expect(html).toContain("else if(j.canUnarchive)");expect(html).toContain("cannot be unarchived while its owner has account deletion pending");expect(html).toContain("Recover ownership and unarchive");expect(html).toContain("j.recoveryRequired?'/recover':'/unarchive'");
     expect(html).toContain("p.status==='active'&&p.role==='owner'");
     expect(html).toContain("j.canAdminister&&p.status==='active'");
     expect(html).toContain("Their contributed content will become unavailable, while contribution history remains.");
@@ -450,7 +451,7 @@ describe("browser UI", () => {
     const fetch = async (url: string, options: { method?: string } = {}) => {
       requests.push({ url, method: options.method });
       if (url === "/api/projects/archived-project/unarchive") return { ok: true, json: async () => ({}) };
-      return { ok: true, json: async () => ({ project, canAdminister: true, members: [], documents: [], events: [], documentsHiddenFromHumans: false }) };
+      return { ok: true, json: async () => ({ project, canAdminister: true, canUnarchive: true, members: [], documents: [], events: [], documentsHiddenFromHumans: false }) };
     };
     const { openProject } = new Function("document", "fetch", "URL", "location", "navigator", browserProgram)(document, fetch, URL, { origin }, {});
     const card = new BrowserElement("article"), toggle = new BrowserElement("button"); toggle.textContent = "Show details"; card.append(toggle);
@@ -493,5 +494,74 @@ describe("browser UI", () => {
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("http://localhost:8787/auth/discord");
     expect(response.headers.get("set-cookie")).toBeNull();
+  });
+});
+
+describe("scheduled account lifecycle", () => {
+  it("blocks unresolved ownership, requires exact confirmation, freezes immediately, and cancels intact", async () => {
+    const alice=await participant("alice"),bob=await participant("graceadmin"),documentId=await create(alice.cookie), publicDocumentId=await create(alice.cookie,"public");
+    const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Needs a decision",readAudience:"members_and_agents"})}).then(r=>r.json<any>());
+    const schedule=(name:string)=>SELF.fetch(`${origin}/api/me/account-deletion`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:name})});
+    expect((await schedule("wrong")).status).toBe(400);
+    const blocked=await schedule("User alice");expect(blocked.status).toBe(409);expect((await blocked.json<any>()).unresolvedOwnedProjects).toEqual([expect.objectContaining({id:made.project.id,name:"Needs a decision"})]);
+    expect((await env.DB.prepare(`SELECT count(*) count FROM project_members WHERE project_id=? AND role='owner'`).bind(made.project.id).first<any>()).count).toBe(1);
+    await invite(made.project.id,alice,bob);await SELF.fetch(`${origin}/api/projects/${made.project.id}/members/${bob.id}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({role:"admin"})});
+    await SELF.fetch(`${origin}/api/projects/${made.project.id}/archive`,{method:"POST",headers:{cookie:alice.cookie,origin}});
+    const before=Date.now(),scheduled=await schedule("User alice"),after=Date.now();expect(scheduled.status).toBe(201);
+    const lifecycle=await env.DB.prepare(`SELECT account_state,deletion_due_at FROM participants WHERE id=?`).bind(alice.id).first<any>();
+    expect(lifecycle.account_state).toBe("deletion_pending");expect(new Date(lifecycle.deletion_due_at).getTime()).toBeGreaterThanOrEqual(before+259200000);expect(new Date(lifecycle.deletion_due_at).getTime()).toBeLessThanOrEqual(after+259200000);
+    expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`,{headers:{cookie:alice.cookie}})).status).toBe(423);
+    expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.md`,{headers:{cookie:alice.cookie}})).status).toBe(423);
+    const publicContext=await SELF.fetch(`${origin}/participants/${alice.id}/context.json`).then(r=>r.json<any>());expect(publicContext.documents.map((d:any)=>d.id)).toEqual([publicDocumentId]);
+    expect((await SELF.fetch(`${origin}/api/me/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"blocked"})})).status).toBe(423);
+    expect((await SELF.fetch(`${origin}/api/me/export`,{headers:{cookie:alice.cookie}})).status).toBe(200);
+    const blockedUnarchive=await SELF.fetch(`${origin}/api/projects/${made.project.id}/unarchive`,{method:"POST",headers:{cookie:bob.cookie,origin}});expect(blockedUnarchive.status).toBe(409);expect((await blockedUnarchive.json<any>()).error.code).toBe("project_owner_deletion_pending");
+    const blockedRecovery=await SELF.fetch(`${origin}/api/projects/${made.project.id}/recover`,{method:"POST",headers:{cookie:bob.cookie,origin}});expect(blockedRecovery.status).toBe(409);expect((await blockedRecovery.json<any>()).error.code).toBe("project_owner_deletion_pending");
+    const frozenProject=await SELF.fetch(`${origin}/api/projects/${made.project.id}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<any>());expect(frozenProject).toMatchObject({canUnarchive:false,unarchiveBlockedReason:"project_owner_deletion_pending"});
+    expect((await SELF.fetch(`${origin}/me`,{headers:{cookie:alice.cookie}})).text()).resolves.toContain("Your account is frozen");
+    expect((await SELF.fetch(`${origin}/api/me/account-deletion/cancel`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(200);
+    expect((await SELF.fetch(`${origin}/api/projects/${made.project.id}/unarchive`,{method:"POST",headers:{cookie:bob.cookie,origin}})).status).toBe(200);
+    expect((await env.DB.prepare(`SELECT account_state FROM participants WHERE id=?`).bind(alice.id).first<any>()).account_state).toBe("active");
+    expect(await env.DB.prepare(`SELECT id FROM documents WHERE id=?`).bind(documentId).first()).toBeTruthy();
+  });
+
+  it("rejects late cancellation and finalizes irreversibly and idempotently", async () => {
+    const alice=await participant("deleteme"),bob=await participant("bobstays"),carol=await participant("ordinarymember"),dave=await participant("inviteaccept"),eve=await participant("invitedecline"),documentId=await create(alice.cookie,"public");
+    const providerId="reusable-discord-id";await env.DB.prepare(`INSERT INTO auth_identities(id,user_id,provider,provider_user_id,created_at) VALUES('idn_old',?,'discord',?,?)`).bind(alice.userId,providerId,new Date().toISOString()).run();
+    const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Archive",readAudience:"members_and_agents"})}).then(r=>r.json<any>());await invite(made.project.id,alice,bob);await SELF.fetch(`${origin}/api/projects/${made.project.id}/members/${bob.id}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({role:"admin"})});
+    const stranded=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"No administrator",readAudience:"members_and_agents"})}).then(r=>r.json<any>());await invite(stranded.project.id,alice,carol);await SELF.fetch(`${origin}/api/projects/${stranded.project.id}/archive`,{method:"POST",headers:{cookie:alice.cookie,origin}});
+    const adminProject=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Admin departure",readAudience:"members_and_agents"})}).then(r=>r.json<any>());await invite(adminProject.project.id,bob,alice);await SELF.fetch(`${origin}/api/projects/${adminProject.project.id}/members/${alice.id}`,{method:"PUT",headers:{cookie:bob.cookie,origin,"content-type":"application/json"},body:JSON.stringify({role:"admin"})});
+    await SELF.fetch(`${origin}/api/projects/${made.project.id}/documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId})});
+    const invitation=await SELF.fetch(`${origin}/api/projects/${adminProject.project.id}/invitations`,{method:"POST",headers:{cookie:alice.cookie,origin}}).then(r=>r.json<any>());expect((await SELF.fetch(`${origin}/api/invitations/${invitation.invitation.token}`).then(r=>r.json<any>())).invitation.active).toBe(true);
+    await SELF.fetch(`${origin}/api/projects/${made.project.id}/archive`,{method:"POST",headers:{cookie:alice.cookie,origin}});
+    await SELF.fetch(`${origin}/api/me/account-deletion`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({displayName:"User deleteme"})});
+    const due="2000-01-01T00:00:00.000Z";await env.DB.prepare(`UPDATE participants SET deletion_due_at=? WHERE id=?`).bind(due,alice.id).run();
+    expect((await SELF.fetch(`${origin}/api/me/account-deletion/cancel`,{method:"POST",headers:{cookie:alice.cookie,origin}})).status).toBe(409);
+    const duePreview=await SELF.fetch(`${origin}/api/invitations/${invitation.invitation.token}`).then(r=>r.json<any>());expect(duePreview.invitation.active).toBe(false);expect((await SELF.fetch(`${origin}/api/invitations/${invitation.invitation.token}`,{method:"POST",headers:{cookie:dave.cookie,origin}})).status).toBe(410);expect((await SELF.fetch(`${origin}/api/invitations/${invitation.invitation.token}/decline`,{method:"POST",headers:{cookie:eve.cookie,origin}})).status).toBe(410);expect(await env.DB.prepare(`SELECT participant_id FROM project_members WHERE project_id=? AND participant_id=?`).bind(adminProject.project.id,dave.id).first()).toBeNull();
+    const expiredExport=await SELF.fetch(`${origin}/api/me/export`,{headers:{cookie:alice.cookie}});expect(expiredExport.status).toBe(410);expect((await expiredExport.json<any>()).error.code).toBe("account_deletion_due");
+    expect((await SELF.fetch(`${origin}/api/me/documents`,{headers:{cookie:alice.cookie}})).status).toBe(410);expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`,{headers:{cookie:alice.cookie}})).status).toBe(410);expect((await SELF.fetch(`${origin}/participants/${alice.id}/context.json`)).status).toBe(404);expect((await SELF.fetch(`${origin}/api/documents/${documentId}?project=${made.project.id}`,{headers:{cookie:bob.cookie}})).status).toBe(404);
+    const logicallyUnavailable=await SELF.fetch(`${origin}/api/projects/${made.project.id}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<any>());expect(logicallyUnavailable.documents[0]).toMatchObject({id:documentId,state:"retracted",logical_path:null,visibility:null,version_number:null,updated_at:null});
+    expect(await env.DB.prepare(`SELECT id FROM documents WHERE id=?`).bind(documentId).first()).toBeTruthy();
+    const {finalizeDueAccounts}=await import("../src/accounts");await finalizeDueAccounts(env,new Date("2026-01-01T00:00:00.000Z"));await finalizeDueAccounts(env,new Date("2026-01-01T00:00:00.000Z"));
+    const tombstone=await env.DB.prepare(`SELECT id,user_id,public_slug,created_at,withdrawn_at,account_state,provenance_identifier,deletion_due_at,deletion_finalized_at FROM participants WHERE id=?`).bind(alice.id).first<any>();expect(tombstone).toMatchObject({id:alice.id,user_id:null,public_slug:null,created_at:null,withdrawn_at:null,account_state:"deleted",deletion_due_at:null});expect(tombstone.provenance_identifier).toBeTruthy();expect(tombstone.deletion_finalized_at).toBeTruthy();expect(await env.DB.prepare(`SELECT id FROM users WHERE id=?`).bind(alice.userId).first()).toBeNull();
+    expect(await env.DB.prepare(`SELECT id FROM documents WHERE id=?`).bind(documentId).first()).toBeNull();expect((await env.DB.prepare(`SELECT count(*) count FROM document_versions WHERE document_id=?`).bind(documentId).first<any>()).count).toBe(0);
+    expect((await SELF.fetch(`${origin}/api/documents/${documentId}?project=${made.project.id}`,{headers:{cookie:bob.cookie}})).status).toBe(404);
+    expect((await env.DB.prepare(`SELECT state,tombstone_title FROM project_documents WHERE document_id=?`).bind(documentId).first<any>())).toMatchObject({state:"retracted",tombstone_title:"Notes"});
+    expect(await env.DB.prepare(`SELECT id FROM auth_identities WHERE user_id=?`).bind(alice.userId).first()).toBeNull();expect(await env.DB.prepare(`SELECT id FROM sessions WHERE user_id=?`).bind(alice.userId).first()).toBeNull();
+    expect(await env.DB.prepare(`SELECT participant_id FROM project_members WHERE project_id=? AND participant_id=?`).bind(made.project.id,alice.id).first()).toBeNull();expect(await env.DB.prepare(`SELECT participant_id FROM project_members WHERE project_id=? AND participant_id=?`).bind(made.project.id,bob.id).first()).toBeTruthy();
+    expect((await env.DB.prepare(`SELECT status FROM project_invitations WHERE id=?`).bind(invitation.invitation.id).first<any>()).status).toBe("revoked");
+    expect((await env.DB.prepare(`SELECT count(*) count FROM account_events WHERE participant_id=? AND event_type='account_deletion_finalized'`).bind(alice.id).first<any>()).count).toBe(1);
+    const departure=await env.DB.prepare(`SELECT actor_participant_id,details_json FROM project_events WHERE project_id=? AND event_type='member_left'`).bind(made.project.id).first<any>();expect(departure.actor_participant_id).toBe(alice.id);expect(JSON.parse(departure.details_json)).toEqual({participantId:alice.id,withdrawContributions:false});
+    const adminDeparture=await env.DB.prepare(`SELECT actor_participant_id,details_json FROM project_events WHERE project_id=? AND event_type='member_left'`).bind(adminProject.project.id).first<any>();expect(adminDeparture.actor_participant_id).toBe(alice.id);expect(JSON.parse(adminDeparture.details_json)).toEqual({participantId:alice.id,withdrawContributions:false});
+    const ordinaryUnarchive=await SELF.fetch(`${origin}/api/projects/${made.project.id}/unarchive`,{method:"POST",headers:{cookie:bob.cookie,origin}});expect(ordinaryUnarchive.status).toBe(409);expect((await ordinaryUnarchive.json<any>()).error.code).toBe("project_ownerless_recovery_required");expect((await env.DB.prepare(`SELECT lifecycle_state FROM projects WHERE id=?`).bind(made.project.id).first<any>()).lifecycle_state).toBe("archived");expect((await env.DB.prepare(`SELECT role FROM project_members WHERE project_id=? AND participant_id=?`).bind(made.project.id,bob.id).first<any>()).role).toBe("admin");
+    const recovery=await SELF.fetch(`${origin}/api/projects/${made.project.id}/recover`,{method:"POST",headers:{cookie:bob.cookie,origin}});expect(recovery.status).toBe(200);expect(await recovery.json<any>()).toMatchObject({project:{status:"active",ownerParticipantId:bob.id,recoveredOwnership:true}});
+    const recovered=await env.DB.prepare(`SELECT x.lifecycle_state,pm.role FROM projects x JOIN project_members pm ON pm.project_id=x.id AND pm.participant_id=? WHERE x.id=?`).bind(bob.id,made.project.id).first<any>();expect(recovered).toEqual({lifecycle_state:"active",role:"owner"});expect((await env.DB.prepare(`SELECT count(*) count FROM project_members WHERE project_id=? AND role='owner'`).bind(made.project.id).first<any>()).count).toBe(1);
+    expect((await SELF.fetch(`${origin}/api/projects/${stranded.project.id}/recover`,{method:"POST",headers:{cookie:carol.cookie,origin}})).status).toBe(403);expect((await env.DB.prepare(`SELECT lifecycle_state FROM projects WHERE id=?`).bind(stranded.project.id).first<any>()).lifecycle_state).toBe("archived");expect((await env.DB.prepare(`SELECT count(*) count FROM project_members WHERE project_id=? AND role='owner'`).bind(stranded.project.id).first<any>()).count).toBe(0);expect((await env.DB.prepare(`SELECT count(*) count FROM projects x WHERE x.lifecycle_state='active' AND NOT EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=x.id AND pm.role='owner')`).first<any>()).count).toBe(0);
+    const projectView=await SELF.fetch(`${origin}/api/projects/${made.project.id}`,{headers:{cookie:bob.cookie}}).then(r=>r.json<any>());expect(projectView.events).toContainEqual(expect.objectContaining({event_type:"member_left",actor_display_name:`${tombstone.provenance_identifier} (former user)`}));expect(projectView.events.filter((e:any)=>e.event_type==="ownership_transferred")).toHaveLength(1);expect(projectView.events.filter((e:any)=>e.event_type==="project_unarchived")).toHaveLength(1);
+    const start=await SELF.fetch(`${origin}/auth/discord`,{redirect:"manual"}),state=/loom_oauth_state=([^;]+)/.exec(start.headers.get("set-cookie")||"")?.[1];expect(state).toBeTruthy();
+    const originalFetch=globalThis.fetch,fetchSpy=vi.spyOn(globalThis,"fetch").mockImplementation(async(input,init)=>{const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;if(url==="https://discord.com/api/oauth2/token")return new Response(JSON.stringify({access_token:"replacement-token"}),{status:200,headers:{"content-type":"application/json"}});if(url==="https://discord.com/api/users/@me")return new Response(JSON.stringify({id:providerId,username:"User deleteme"}),{status:200,headers:{"content-type":"application/json"}});return originalFetch(input as RequestInfo,init)});
+    let callback:Response;try{callback=await SELF.fetch(`${origin}/auth/discord/callback?state=${encodeURIComponent(state!)}&code=new-code`,{headers:{cookie:`loom_oauth_state=${state}`},redirect:"manual"})}finally{fetchSpy.mockRestore()}expect(callback!.status).toBe(302);
+    const replacement=await env.DB.prepare(`SELECT u.id user_id,p.id participant_id,p.provenance_identifier FROM auth_identities i JOIN users u ON u.id=i.user_id JOIN participants p ON p.user_id=u.id WHERE i.provider='discord' AND i.provider_user_id=?`).bind(providerId).first<any>();expect(replacement.user_id).not.toBe(alice.userId);expect(replacement.participant_id).not.toBe(alice.id);expect(replacement.provenance_identifier).not.toBe(tombstone.provenance_identifier);
+    const unchanged=await env.DB.prepare(`SELECT id,user_id,provenance_identifier,account_state FROM participants WHERE id=?`).bind(alice.id).first<any>();expect(unchanged).toEqual({id:alice.id,user_id:null,provenance_identifier:tombstone.provenance_identifier,account_state:"deleted"});
   });
 });

@@ -49,8 +49,9 @@ export async function readDocument(env: Env, principal: Principal, id: string, p
     JOIN documents d ON d.id=pd.document_id AND d.deleted_at IS NULL
     JOIN document_versions v ON v.id=d.current_version_id
     JOIN participants p ON p.id=d.owner_id JOIN users u ON u.id=p.user_id
-    WHERE project.id=? AND project.read_audience='members_and_agents' AND pd.state='active' AND d.id=?`)
-    .bind(principal.participantId, projectId, id).first<DocumentRow & { owner_display_name: string }>();
+    WHERE project.id=? AND project.read_audience='members_and_agents' AND pd.state='active' AND d.id=?
+      AND (p.account_state!='deletion_pending' OR p.deletion_due_at>?)`)
+    .bind(principal.participantId, projectId, id, new Date().toISOString()).first<DocumentRow & { owner_display_name: string }>();
   if (!shared) return problem(404, "not_found", "Document not found");
   return json({ document: shared, canEdit: false, context: "project", projectId });
 }
@@ -162,7 +163,7 @@ export async function history(env: Env, principal: Principal, id: string): Promi
 }
 
 export async function context(_request: Request, env: Env, participantId: string, format: "json" | "md", principal: Principal | null): Promise<Response> {
-  const participant = await env.DB.prepare(`SELECT p.id,u.display_name FROM participants p JOIN users u ON u.id=p.user_id WHERE p.id=? AND p.withdrawn_at IS NULL`).bind(participantId).first<{ id: string; display_name: string }>();
+  const participant = await env.DB.prepare(`SELECT p.id,u.display_name FROM participants p JOIN users u ON u.id=p.user_id WHERE p.id=? AND p.withdrawn_at IS NULL AND (p.account_state!='deletion_pending' OR p.deletion_due_at>?)`).bind(participantId,new Date().toISOString()).first<{ id: string; display_name: string }>();
   if (!participant) return problem(404, "not_found", "Participant not found");
   const isOwner = principal?.participantId === participantId;
   const rows = await env.DB.prepare(`${currentDocuments} AND (?=1 OR d.visibility='public') ORDER BY d.logical_path,d.id`).bind(participantId, isOwner ? 1 : 0).all<DocumentRow>();

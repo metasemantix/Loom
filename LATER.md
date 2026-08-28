@@ -250,3 +250,7 @@ Unless implementation reveals a hard dependency, defer:
 - THREAD/relation-layer integration.
 
 These may become useful later. They should not prevent Loom from first becoming a small, coherent, portable environment in which humans can own a corpus, deliberately share it, collaborate around project-owned and participant-owned artifacts, and expose those structures safely enough for agents to begin reading them.
+
+## Account-deletion notifications
+
+Use the structured account, project, and contribution lifecycle events to notify project heads/admins when final account deletion affects their project. This account-lifecycle slice deliberately does not introduce a general notification subsystem.

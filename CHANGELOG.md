@@ -55,3 +55,16 @@ data and are not recorded here.
   request.
 - Participant ownership is resolved from server-side session state rather than
   client-supplied participant identifiers.
+
+## Account lifecycle
+
+- Added immutable human-readable participant provenance identifiers and minimal former-user tombstones.
+- Added informed account-deletion scheduling with owned-project prerequisites, a configurable 72-hour frozen grace period, export and cancellation access, and a countdown UI.
+- Added centralized pending-account mutation gating and a retry-safe Cloudflare scheduled finalizer that destroys participant content/authentication data, revokes invitations, removes memberships, and preserves unavailable contribution provenance.
+- Hardened the frozen grace period against owner-authenticated context/read bypasses while preserving ordinary public reads for other callers.
+- Reduced finalized participant tombstones to stable participant/provenance identity and finalization state, added ordinary project departure history, and made provider re-registration and provenance-collision handling safe.
+- Preserved the owned-project deletion prerequisite during grace by blocking unarchive while the current owner is deletion-pending, and rebuilt participant references with D1-supported deferred foreign-key migrations.
+- Added explicit ownerless archived-project recovery: after a former owner is finalized, an existing admin may deliberately become owner while unarchiving; ordinary members cannot claim ownership and active ownerless projects remain impossible.
+- Separated ownerless recovery from ordinary unarchive into an explicit admin-only recovery action, so an unarchive request can never implicitly claim ownership.
+- Made the stored deletion deadline the immediate logical content-access boundary and increased scheduled cleanup frequency to once per minute.
+- Made invitations created by a participant logically unavailable at that participant’s deletion deadline, including commit-time acceptance/decline guards before physical revocation.
