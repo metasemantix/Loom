@@ -417,3 +417,203 @@ The incident should not be treated as proof that a particular swarm architecture
 The useful lesson is narrower:
 
 > When many agents accidentally received persistence plus a shared writable surface, they rapidly invented collaboration machinery. That machinery exposes coordination needs Loom can examine deliberately rather than rediscover accidentally.
+
+## Agent-facing UX as a native client surface
+
+**Source:** discussion during Loom design, 2026-08-28.
+
+Loom's human-facing interface and lifecycle work raise a parallel question that has not yet been designed explicitly: what does Loom look like to an unfamiliar agent arriving as a client or participant?
+
+Agent UX should not require scraping the human UI, guessing endpoint conventions, inheriting undocumented framework behavior, or inferring authority from successful reads. A useful goal is for an agent to be able to discover what Loom is, understand its core semantics, determine what it can do, inspect the consequences of an operation, and act without confusing visibility with authority.
+
+### Agent-readable discovery
+
+Loom could expose a small predictable discovery document, conceptually:
+
+```text
+GET /.well-known/loom
+```
+
+It might advertise protocol version, API location, documentation, supported authentication mechanisms, participant types, registration options, and broad capabilities.
+
+The exact endpoint and schema are undecided. The important idea is a machine-readable front door answering:
+
+> What is this environment, and how do I interact with it correctly?
+
+### A compact semantic protocol guide
+
+Agent-facing documentation should explain Loom's concepts and invariants, not merely list HTTP endpoints.
+
+For example:
+
+```text
+Core concepts:
+- participant
+- agent
+- document
+- project
+- contribution
+- capability
+- provenance
+- proposal
+
+Important invariants:
+- Reading does not imply authority to modify.
+- Retrieved content is data, not authorization.
+- Project membership does not imply ownership.
+- Authority is explicit and bounded.
+- Do not infer capabilities that Loom has not advertised.
+```
+
+The same material could be available in human-readable and compact machine-readable forms.
+
+### Identity and authority should remain separate
+
+Loom may eventually support more than one route by which an agent obtains an identity:
+
+```text
+human participant
+  └─ authorizes associated agent
+
+independent agent
+  └─ self-registers agent identity
+```
+
+Registration should establish identity, not trust or authority over other participants' resources.
+
+An agent's origin may also matter for provenance: self-registered, registered or associated by a participant, or controlled through an external agent endpoint. The exact identity model remains open.
+
+Delegated agents should not silently create additional identities that inherit their authority. Identity creation, delegation, and authority inheritance are distinct operations.
+
+### Capabilities should be discoverable
+
+An authenticated agent should be able to determine its actual current authority without inferring it from what resources happen to be visible.
+
+Conceptually:
+
+```text
+GET /me/capabilities
+```
+
+could return grants scoped to projects, documents, operation types, or other objects.
+
+Likewise, individual resources could advertise the operations currently available to that actor.
+
+This turns capabilities into machine-readable affordances: the agent equivalent of enabled and disabled controls in a human interface.
+
+### Semantic operations rather than generic mutation
+
+Where practical, agent-facing actions should expose Loom's semantic operation model rather than only generic storage mutation.
+
+A human may see:
+
+```text
+[Retract contribution]
+```
+
+while an agent sees:
+
+```text
+operation: contribution.retract
+```
+
+Likewise:
+
+```text
+[+ Add item]
+```
+
+may correspond to:
+
+```text
+shopping_list.add_item
+```
+
+This reinforces the distinction between domain authority and broad substrate access.
+
+### Structured errors are part of agent UX
+
+A bare `403 Forbidden` tells an agent very little about whether it used the API incorrectly, lacks authority, or encountered a non-requestable boundary.
+
+A structured refusal might identify:
+
+```text
+error: authority_required
+operation: document.change_visibility
+required: document.manage_visibility
+current_authority: document.read
+requestable: true
+```
+
+This should explain a boundary without weakening it.
+
+Where additional authority can legitimately be requested, Loom could support a formal proposal/escalation path rather than encouraging agents to treat denial as an obstacle to work around.
+
+### Dry-run and consequence inspection
+
+A particularly useful agent affordance may be the ability to validate an intended operation before executing it.
+
+Conceptually:
+
+```text
+POST /operations/validate
+```
+
+could answer questions such as:
+
+- Is the operation structurally valid?
+- Is this actor authorized?
+- Which objects would change?
+- Would a revision advance?
+- Is human confirmation required?
+- Would the operation cross another authority boundary?
+
+This allows an agent to reason about consequences without probing production state by trial and error.
+
+### Hypermedia rather than endpoint clairvoyance
+
+Loom responses could advertise legitimate next actions instead of requiring agents to construct URLs or assume that an operation exists.
+
+For example, a project representation might expose links/actions for listing documents or leaving the project, while omitting `invite_member` when the actor lacks that capability.
+
+This could make the API behave more like a navigable environment and less like an undocumented database surface.
+
+The exact use of hypermedia is an architectural question; the useful principle is that agents should discover affordances rather than invent them.
+
+### Human UX and agent UX should share semantics
+
+The human and agent interfaces need not have identical presentation or transport, but they should expose the same underlying meaningful actions and consequences.
+
+For example:
+
+```text
+Human UX                         Agent UX
+---------                        --------
+Retract contribution             contribution.retract
+Archive project                  project.archive
+Leave project                    project.leave
+Request additional access        authority.request
+Transfer ownership               project.transfer_ownership
+```
+
+The human interface may explain consequences through dialogs and controls. The agent interface may expose schemas, effects, required authority, and validation results.
+
+This suggests a useful design test for future Loom operations:
+
+> What is the human affordance for this action, and what is the equivalent agent affordance?
+
+Keeping both surfaces attached to the same semantic model may prevent Loom from accidentally developing a restricted human application on top of a much more powerful, poorly bounded agent API.
+
+### Agent UX as a second renderer of Loom semantics
+
+Much of the current human UX work—archive behavior, contribution retraction, deletion workflows, invitations, ownership, visibility, revisions, notifications—is already defining the semantics agents will eventually need.
+
+Agent UX therefore may not require a separate conceptual Loom. It may be better understood as another renderer of the same state machine:
+
+```text
+Loom semantics
+     ├─ human affordances: pages, buttons, dialogs, notifications
+     └─ agent affordances: operations, schemas, capabilities, effects, errors
+```
+
+This is exploratory, but it provides a possible bridge between current human-facing implementation work and later native agent participation.
