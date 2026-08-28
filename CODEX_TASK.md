@@ -1,159 +1,189 @@
 # Current Codex Task
 
-Implement the next Loom project-lifecycle slice: **archive/unarchive enforcement plus leave/removal contribution semantics**.
+Implement the next bounded Loom slice: **project-native documents**.
 
-Read `AGENTS.md` first, then `DECISIONS.md`, `docs/PROJECT_LIFECYCLE.md`, `docs/CONTRIBUTION_LIFECYCLE.md`, relevant migrations, `src/projects.ts`, `src/index.ts`, `src/ui.ts`, and existing project/invitation tests. Treat the architecture docs as normative. If implementation and architecture appear to conflict, preserve the architecture and report the conflict rather than silently choosing an easier behavior.
+Read `AGENTS.md` first, then `DECISIONS.md`, `docs/PROJECT_NATIVE_DOCUMENTS.md`, `docs/PROJECT_LIFECYCLE.md`, `docs/CONTRIBUTION_LIFECYCLE.md`, relevant migrations, document/project/account code, UI, export code, and existing tests. Treat `docs/PROJECT_NATIVE_DOCUMENTS.md` as normative for this slice.
 
-## Scope
+If existing implementation and settled architecture conflict, preserve the architecture and report the conflict rather than silently choosing an easier behavior.
 
-Implement:
+## Goal
 
-- canonical project lifecycle state: `active | archived`;
-- archive/unarchive endpoints and UI;
-- owner **and admin** may archive/unarchive; ordinary members may not;
-- centralized server-side lifecycle guards for project mutations;
-- archive revokes all outstanding invitations immediately;
-- invitation acceptance must re-check current project state and must never create membership after archive;
-- archived projects remain readable/exportable according to existing policy, while forward collaboration/mutation is frozen;
-- source owners may still retract their own participant-owned contributions while archived;
-- project status is exposed by list/detail APIs and visibly represented in UI;
-- voluntary leave with a simple unchecked-by-default checkbox: `Withdraw my contributions from this project`;
-- kicked-member contribution suspension rather than automatic deletion or continued body access;
-- contribution relationship state sufficient to represent `active`, `suspended_after_removal`, and `retracted`;
-- source-owner control over contribution relationships even after project membership ends;
-- project-side metadata/tombstones for unavailable contributions without document-body leakage;
-- `agents_only` hides bodies from humans but does not hide ordinary metadata such as title, contributor/provenance, contribution state, and history;
-- structured lifecycle/contribution events and tests for the above.
+Add documents that are genuinely owned by a project while preserving Loom's existing participant-owned document and contribution semantics.
 
-Do **not** implement scheduled deletion, shell creation, account deletion, ownerless succession, project-native import/export, a new notification subsystem, or agent runtime in this slice.
+A project-native document is project property from creation. Participant authorship/provenance remains recorded, but the creator is not the document owner.
 
-## Core invariants
+Do not implement project deletion in this slice.
 
-Project membership, document ownership, and contribution presence are independent relationships.
+## Required semantics
 
-Participant-owned documents remain participant-owned. Archive must never snapshot or secretly preserve participant-owned content. Lifecycle restrictions must be enforced server-side, not merely by hiding controls.
+Implement the complete semantics in `docs/PROJECT_NATIVE_DOCUMENTS.md`, including:
 
-Do not use a competing `active_project` boolean if lifecycle state already expresses the same fact. Existing projects and existing project-document relationships should migrate safely to `active`.
+- explicit, unambiguous project ownership for native documents;
+- stable document identity and independent revision history;
+- creator and revision-actor provenance separate from ownership;
+- owner/admin/member creation and ordinary editing while the project is active;
+- project audience/access semantics rather than a second personal Public/Private visibility model;
+- a fixed **72-hour creator deletion entitlement** stored as a concrete deadline;
+- no deadline reset from edits by creator or others;
+- immediate document deletion when authorized, with no second deletion grace period;
+- owner/admin normal deletion authority;
+- no permanent deletion authority for ordinary members merely because they created or edited a document;
+- creator deletion entitlement surviving voluntary leave and administrative removal until the original deadline;
+- no restoration of ordinary project access merely to exercise that exceptional deletion right;
+- archive blocking ordinary native-document mutations while preserving a still-valid creator deletion entitlement;
+- creator account deletion leaving project-owned documents intact and using existing deleted-participant provenance semantics;
+- explicit distinction between participant-owned contribution/linking and creation of an independent project-owned copy;
+- project-owned copies receiving a new stable ID, independent history, and source provenance without future synchronization;
+- project export including accessible native documents;
+- personal account export not absorbing project-owned bodies merely because the participant authored them;
+- project activity/history integration using existing provenance machinery.
 
-Avoid deleting relationship rows merely to represent state transitions. Preserve stable document identity and provenance.
+## Creator deletion authorization
 
-## Archive semantics
+This is a security/lifecycle invariant, not merely a UI convenience.
 
-Archive is reversible. Unarchive means **undo archive** and restores the same project.
+For the exceptional 72-hour creator delete path, authorization must depend on creator identity, document identity, the stored deadline, and applicable account/lifecycle state. It must **not** require current project membership.
 
-On archive:
+A creator who leaves or is kicked during the window must still be able to delete the project-native document until the original deadline. Project leadership must not be able to defeat the temporary creator right by removing the creator.
 
-1. transition to archived;
-2. record actor/timestamp and structured project event;
-3. revoke all outstanding invitations;
-4. reject forward project mutations.
+The former member must not regain project read/edit access in order to exercise deletion. Provide a narrow owner-side/former-member-accessible control surface for documents whose creator entitlement is still live.
 
-At minimum audit and guard project metadata/read-policy edits, new contribution links, invitation creation/acceptance, membership additions, role changes, ownership transfer, and any existing project-native mutation routes.
+At the exact deadline the entitlement is over. Test `before` versus `at/after` explicitly.
 
-While archived, still allow normal project read access, existing export behavior, voluntary leave, source-owner retraction, and authorized unarchive.
+## Archive interaction
 
-Revoked invitations do not revive on unarchive.
+Existing archive semantics remain authoritative: archived projects are read-only collaboration spaces.
 
-Lifecycle checks must be authoritative near commit time so an operation started while active cannot commit after archive.
+Project-native documents remain readable according to existing project access/audience rules. Ordinary create/edit/rename/move/delete operations must not bypass archive merely because an actor is owner/admin.
 
-## Voluntary leave
+The still-valid 72-hour creator deletion entitlement is an explicit lifecycle exception and remains exercisable while archived.
 
-UI should be simple:
+## Copy versus contribution
 
-```text
-Leave project
-[ ] Withdraw my contributions from this project
-```
+Do not repurpose participant-owned contribution rows to represent native ownership.
 
-No wizard. Checkbox is unchecked by default. Showing the number of affected contributions is useful if easy.
+The UI/API must preserve the conceptual distinction:
 
-Unchecked:
+- **Contribute/link:** participant owns source; existing contribution lifecycle applies.
+- **Copy to project:** create a new project-owned document with a new ID and independent history.
 
-- membership ends;
-- current contributions remain active;
-- former member loses project visibility;
-- source owner still sees/manages/retracts their own contribution relationships from their own document side.
+A project-owned copy records appropriate source provenance. Later source edit, privacy change, retraction, or deletion does not change the copy, and project-copy edits do not propagate to the source.
 
-Checked:
+Copying crosses an ownership boundary. Provide clear confirmation that the new copy belongs to the project and is independent of the source.
 
-- membership ends;
-- their current participant-owned contributions transition to `retracted`;
-- source documents remain intact.
+## Account lifecycle interaction
 
-The owner cannot simply leave while still owner; preserve the ownership-transfer requirement.
+The merged account-deletion lifecycle is authoritative.
 
-## Kick/removal
+Project-native documents must survive creator account deletion because the project, not the participant, owns them. When the creator reaches the hard account-deletion deadline, their personal creator entitlement can no longer be exercised. Existing participant tombstone/provenance behavior should make historical authorship intelligible without retaining the old mutable display name.
 
-Removal ends membership immediately and does not require cooperation from the removed participant.
+Do not weaken account-deletion deadline enforcement to implement this feature.
 
-Do not keep their document bodies readable by default, and do not delete the contribution relationship.
+## Data model and migration
 
-Instead, active contributions transition to `suspended_after_removal`:
+Choose the smallest clear schema extension that represents project ownership without making participant ownership ambiguous.
 
-- document body becomes unavailable through the project;
-- title/allowed metadata/provenance/history remain represented;
-- source ownership is unchanged;
-- former contributor can later retract or explicitly re-authorize the same relationship.
+Preserve existing participant-owned documents, IDs, revisions, visibility, and contribution relationships. Existing installations must migrate without data loss or accidental ownership conversion.
 
-Past consent while participating is not treated as indefinite consent after expulsion.
+Use D1-compatible migration patterns already established in the repository. Do not disable foreign-key enforcement as a migration shortcut.
 
-A polished re-authorization UI may be deferred if necessary, but the schema/backend must not make re-authorization impossible. Record a clear `LATER.md` item if that UI is deferred.
+Store the creator deletion deadline concretely so future policy changes do not retroactively change existing entitlements.
 
-## Owner-side contribution control
+## Authorization and race safety
 
-Project membership must not be required for a source owner to inspect or manage their own contribution relationship.
+Permission/lifecycle checks must be authoritative at mutation/commit time, not merely preflight checks or hidden UI controls.
 
-After leaving/removal, owner-side API/UI should expose enough to identify the project/document relationship, its state (`active`, `suspended_after_removal`, `retracted`), and available owner actions.
+Audit race windows involving:
 
-Owning a contributed document does not grant project visibility.
+- project archive during create/edit/copy/delete;
+- membership removal/leave during creator delete;
+- role change during ordinary mutation/delete;
+- creator entitlement expiry during delete;
+- creator account reaching its hard deletion deadline during delete.
 
-## Project document overview and `agents_only`
+A request that began while authorized must not commit after the relevant authority disappears.
 
-Project members may see former/outside contributor entries when those relationships remain legitimately represented.
+Reuse centralized guards/helpers where possible rather than scattering subtly different ownership checks across routes.
 
-Clearly distinguish active outside contributions, suspended contributions, and retracted/unavailable contributions. Suspended/retracted entries expose only permitted metadata, never body content.
+## UI
 
-For `agents_only` projects, human members may still see title, contributor/provenance, contribution state, metadata/history, and document existence. Human body access remains forbidden.
+Add the smallest coherent UI needed to exercise the feature:
 
-## History/events
+- create a document directly in an eligible active project;
+- open/read/edit project-native documents according to project policy;
+- distinguish native documents from participant-owned contributions where necessary for comprehension/actions;
+- expose normal deletion only to authorized roles;
+- expose the creator's temporary deletion action while valid, including after membership ends, without exposing the project corpus;
+- provide an intentional Copy to project flow distinct from contribution/linking;
+- hide/disable controls whose operations are forbidden by archive or other lifecycle state.
 
-Use structured event types where appropriate, including equivalents of:
-
-- `project_archived`
-- `project_unarchived`
-- `member_left`
-- `member_removed`
-- `contribution_retracted`
-- `contribution_suspended`
-- `contribution_reauthorized`
-
-Document title changes are metadata history separate from document-body visibility. Historical titles may remain in provenance/tombstones; do not copy bodies into history.
-
-Persistent notifications are desired later, especially for former contributors, but do not expand this slice into building a notification subsystem if one does not already exist. Preserve structured events/state that can support it and add an explicit `LATER.md` item where needed.
+Do not add a second project-native visibility system unless required by already-settled architecture.
 
 ## Tests
 
-Add positive and negative coverage for:
+Implement the required coverage in `docs/PROJECT_NATIVE_DOCUMENTS.md` and regression-test existing document/contribution behavior.
 
-- owner/admin can archive; member cannot;
-- owner/admin can unarchive; member cannot;
-- status returned by APIs/UI;
-- archive revokes outstanding invitations;
-- a pre-existing invitation cannot be accepted after archive and creates no membership;
-- blocked archived mutations fail server-side;
-- archived read/leave/source-owner retraction still work;
-- voluntary leave unchecked keeps contributions active;
-- voluntary leave checked retracts them without deleting source docs;
-- kicked member loses membership and their active contribution relationships become suspended, not deleted;
-- suspended bodies are unavailable through the project while metadata remains;
-- former contributor still has owner-side control;
-- `agents_only` exposes permitted metadata to humans but not body content;
-- existing active-project behavior remains intact unless deliberately changed by this task.
+At minimum cover:
 
-Audit all project-related routes rather than guarding only obvious handlers.
+- active owner/admin/member create/edit permissions;
+- project ownership distinct from creator provenance;
+- owner/admin deletion;
+- ordinary member denial after creator entitlement expires;
+- creator deletion before 72 hours;
+- denial exactly at/after deadline unless separately authorized;
+- edits do not alter the deadline;
+- creator deletion after voluntary leave;
+- creator deletion after kick;
+- no former-member corpus access from the exceptional delete surface;
+- archive blocks ordinary mutations but permits a live creator entitlement;
+- creator account deletion leaves native documents intact and ends personal authority at the account deadline;
+- deleted-creator provenance;
+- project-owned copy has new ID/independent history/source provenance;
+- source changes/deletion/retraction do not affect project copy;
+- participant-owned contribution semantics remain unchanged;
+- project export versus personal account export behavior;
+- migration safety for existing participant-owned documents.
+
+Include negative tests and exact-boundary/race-sensitive tests, not only happy paths.
+
+## Non-goals
+
+Do not implement in this slice:
+
+- project scheduled deletion or shell finalization;
+- a general ownership-transfer primitive;
+- automatic ownership succession;
+- a new notification subsystem;
+- per-document project ACL complexity not already required by settled policy;
+- synchronization between participant source documents and project-owned copies;
+- agent runtime/capability work unrelated to making the document model correct.
+
+If one of these becomes necessary to avoid corrupt semantics, stop and report the architectural dependency rather than silently expanding scope.
 
 ## Completion
 
-Follow all validation and smoke-test requirements in `AGENTS.md`. Update `CHANGELOG.md`; use `LATER.md` for intentional deferrals.
+Follow all validation and functional smoke-test requirements in `AGENTS.md`.
 
-At completion, report schema/migrations, lifecycle helpers, endpoints changed, UI changes, tests, deferred items, and any ambiguity encountered rather than guessed around.
+Run:
+
+```text
+npm test
+npm run typecheck
+git diff --check
+```
+
+Perform meaningful UI smoke tests where the environment permits them, including creation, edit, deletion, copy-to-project, and existing participant-document loading. Verify rendered inline browser JavaScript actually parses.
+
+Update `CHANGELOG.md`; use `LATER.md` only for genuine intentional deferrals.
+
+At completion, report separately:
+
+- schema/migration changes;
+- ownership/authorization helpers;
+- endpoints and UI surfaces changed;
+- provenance/export behavior;
+- tests/checks passed;
+- tests/checks failed;
+- checks that could not be performed;
+- intentional deferrals;
+- ambiguities encountered rather than guessed around.
