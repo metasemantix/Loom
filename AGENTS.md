@@ -6,6 +6,7 @@ This file contains operating rules for coding agents working on Loom.
 
 - If `CODEX_TASK.md` exists, read it before changing code. It is the current bounded implementation assignment and must be read together with the architecture and decision documents it references.
 - `CODEX_TASK.md` does not override settled architecture. If it appears to conflict with `DECISIONS.md` or the relevant architecture documents, preserve the settled architecture and report the conflict rather than silently choosing an interpretation.
+- Read `docs/TESTING_MODEL.md` for Loom's standing acceptance-testing model.
 - For project-native document work, `docs/PROJECT_NATIVE_DOCUMENTS.md` is normative and must be read together with `docs/PROJECT_LIFECYCLE.md` and `docs/CONTRIBUTION_LIFECYCLE.md`. Keep project ownership, participant authorship, membership, and participant-owned contribution relationships distinct.
 - Stay within the current task's explicit scope and non-goals.
 
@@ -38,6 +39,14 @@ Preserve existing user-visible capabilities and established semantics unless the
 - Permission changes require negative tests as well as positive tests: prove not only that Alice can perform an action, but that Bob cannot.
 - Do not broaden permissions implicitly when adding project, manifest, folder, or agent features.
 - Lifecycle and permission checks must remain authoritative at mutation/commit time. A stale preflight read must not allow an operation to commit after membership, role, project state, account state, or a time-bounded entitlement has changed.
+
+## Acceptance coverage
+
+- Model consequential behavior as `actor + operation + target + relevant state -> expected result + expected state transition`, as defined in `docs/TESTING_MODEL.md`.
+- Before completing a change, identify which existing operation branches it affects. Add or update acceptance coverage when a new operation or meaningful state branch is introduced.
+- Keep the canonical reference test world stable. Extend it only when a genuinely new semantic state is needed.
+- A passing suite proves only covered behavior. Never describe it as proof that all product functionality is covered.
+- If an acceptance test exposes a conflict with settled architecture, fix the implementation narrowly. If policy is ambiguous, report it rather than changing the expectation to fit existing behavior.
 
 ## Database and migrations
 
