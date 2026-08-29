@@ -55,6 +55,13 @@ Preserve existing user-visible capabilities and established semantics unless the
 - Never solve migration problems by deleting or resetting user data.
 - Preserve existing document IDs, ownership, provenance, and revision history unless a task explicitly requires otherwise.
 
+## Dependency installation and sandbox limits
+
+- Prefer the repository's existing dependencies and toolchain. Do not add or install extra packages merely to perform optional inspection or validation if the task can be completed with what is already available.
+- If an external package install or download fails because the execution environment clearly denies network/proxy access (for example `403 Forbidden`, proxy tunnel failure, or equivalent), do not repeatedly retry the same command. One failed attempt is sufficient to establish the environment limitation unless there is evidence the failure was transient.
+- Do not change Loom's dependency versions or package configuration to work around a sandbox/network restriction unless the task itself requires that dependency change.
+- Continue with available tools where possible and report the blocked setup or validation step explicitly as unperformed due to the environment.
+
 ## Browser UI: verify the rendered program
 
 A green TypeScript build and passing server tests do not prove that generated browser JavaScript works.
