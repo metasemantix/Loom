@@ -30,6 +30,7 @@ const snapshot=async()=>({
   versions:(await env.DB.prepare(`SELECT id,version_number,content FROM document_versions WHERE document_id='doc_migration' ORDER BY version_number`).all()).results,
   event:await env.DB.prepare(`SELECT id,document_id,event_type,changes_json FROM document_events WHERE id='dev_migration'`).first(),
   contribution:await env.DB.prepare(`SELECT project_id,document_id,source_owner_participant_id,state FROM project_documents WHERE project_id='prj_migration' AND document_id='doc_migration'`).first(),
+  membership:await env.DB.prepare(`SELECT project_id,participant_id,role,joined_at FROM project_members WHERE project_id='prj_migration' AND participant_id='par_migration'`).first(),
 });
 const before=await snapshot();
 await apply(projectNativeDocuments);

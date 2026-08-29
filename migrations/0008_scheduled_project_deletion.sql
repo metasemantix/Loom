@@ -47,6 +47,20 @@ CREATE TABLE project_document_revision_shell(
 );
 CREATE INDEX project_document_revision_shell_document ON project_document_revision_shell(project_id,document_id,version_number);
 
+-- Historical membership is copied here before live membership is removed.
+-- No authorization query reads this table, so these rows preserve provenance
+-- without conferring visibility, access, administration, or recovery rights.
+CREATE TABLE project_membership_shell(
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  participant_id TEXT NOT NULL REFERENCES participants(id) ON DELETE RESTRICT,
+  participant_provenance_identifier TEXT NOT NULL,
+  historical_role TEXT NOT NULL CHECK(historical_role IN ('owner','admin','member')),
+  joined_at TEXT NOT NULL,
+  finalized_at TEXT NOT NULL,
+  PRIMARY KEY(project_id,participant_id)
+);
+CREATE INDEX project_membership_shell_participant ON project_membership_shell(participant_id,project_id);
+
 CREATE TRIGGER project_documents_active_source_insert BEFORE INSERT ON project_documents WHEN NEW.state='active' AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id=NEW.document_id AND d.owner_type='participant' AND d.owner_id=NEW.source_owner_participant_id AND d.deleted_at IS NULL) BEGIN SELECT RAISE(ABORT,'active contribution requires a live owned source'); END;
 CREATE TRIGGER project_documents_active_source_update BEFORE UPDATE OF state,document_id,source_owner_participant_id ON project_documents WHEN NEW.state='active' AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id=NEW.document_id AND d.owner_type='participant' AND d.owner_id=NEW.source_owner_participant_id AND d.deleted_at IS NULL) BEGIN SELECT RAISE(ABORT,'active contribution requires a live owned source'); END;
 CREATE TRIGGER documents_tombstone_project_contributions BEFORE DELETE ON documents BEGIN UPDATE project_documents SET tombstone_title=CASE WHEN state='active' THEN OLD.title ELSE tombstone_title END,state='retracted',state_changed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE document_id=OLD.id AND source_owner_participant_id=OLD.owner_id AND state!='retracted'; END;
