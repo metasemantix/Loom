@@ -9,7 +9,8 @@ export const operationBranches = {
   "project-native.copy": ["new-id.independent","source-deleted.copy-survives"],
   "contribution.lifecycle": ["active","suspended-after-removal","retracted"],
   "invitation.lifecycle": ["outstanding","accepted","declined","revoked","expired"],
-  "project.lifecycle": ["active","archived"],
+  "project.lifecycle": ["active","archived","deletion-pending","shell"],
+  "project.deletion": ["owner.schedule.allowed","admin.schedule.denied","member.schedule.denied","confirmation.exact","active.archives","archived.schedules","before-deadline.cancel-owner","at-deadline.cancel-denied","reschedule.fresh-deadline","finalization.content-destroyed"],
   "document.read": ["owner-private.allowed","other-private.denied","anonymous-public.allowed"],
 } as const;
 export const caseName=(operation:keyof typeof operationBranches,branch:string)=>`${operation} :: ${branch}`;

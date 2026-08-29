@@ -1,6 +1,7 @@
 import { opaque } from "./auth";
 import { json, problem, readJson } from "./http";
 import type { Env, Principal } from "./types";
+import { finalizeDueProjects } from "./project-deletion";
 
 const wordsA=["amber","brisk","calm","copper","green","kind","lunar","prime","quiet","silver"];
 const wordsB=["finch","lark","otter","pine","raven","reed","sparrow","willow","wren","yak"];
@@ -43,6 +44,7 @@ export async function cancelDeletion(env:Env,p:Principal):Promise<Response>{
 }
 
 export async function finalizeDueAccounts(env:Env,now=new Date()):Promise<number>{
+  await finalizeDueProjects(env,now);
   const due=await env.DB.prepare(`SELECT id,user_id FROM participants WHERE account_state='deletion_pending' AND deletion_due_at<=? ORDER BY deletion_due_at`).bind(now.toISOString()).all<{id:string;user_id:string}>();
   for(const participant of due.results)await finalizeAccount(env,participant.id,participant.user_id,now.toISOString());
   return due.results.length;
