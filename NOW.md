@@ -35,4 +35,9 @@ This is the quick-fix drawer: things worth doing soon because they remove immedi
 - Do **not** treat project-owned copies as current links merely because they retain source provenance. A copied document is independent project-owned state, not an ongoing relationship to the source document.
 - Keep the first-pass presentation compact. Rich lifecycle distinctions can remain secondary unless they are needed to avoid misleading the user.
 
+## Minor cosmetic follow-up
+
+- Make project-owned document **Revision history** collapsible after it has been opened; default it closed.
+- Give **Create project-owned document** and **Add my document to project** consistent layout, spacing, and panel treatment. Their semantics remain deliberately distinct.
+
 These are UX changes around settled document and ownership semantics, not changes to the ownership model itself.
