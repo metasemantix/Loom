@@ -68,3 +68,11 @@ data and are not recorded here.
 - Separated ownerless recovery from ordinary unarchive into an explicit admin-only recovery action, so an unarchive request can never implicitly claim ownership.
 - Made the stored deletion deadline the immediate logical content-access boundary and increased scheduled cleanup frequency to once per minute.
 - Made invitations created by a participant logically unavailable at that participant’s deletion deadline, including commit-time acceptance/decline guards before physical revocation.
+
+## Project-native documents
+
+- Added explicitly project-owned documents and independent project copies with stable IDs, revision/source provenance, project exports, and preserved participant-owned contribution behavior.
+- Added fixed 72-hour creator deletion deadlines, former-member deletion controls, exact deadline/account-lifecycle enforcement, and archive- and role-aware commit-time mutation guards.
+- Added project-native creation, reading, editing, metadata management, deletion, copy, activity/history, export, migration, UI, and regression coverage.
+- Closed human `agents_only` body access through native-document history and project export, made copy-source validation commit-authoritative, aligned document controls with live authority, split metadata/content saves, and preserved deletion-time titles in project activity.
+- Corrected migration 0007 to rebuild revision/event child tables safely before replacing `documents`, preserving existing revisions, metadata history, and contribution relationships during upgrades.

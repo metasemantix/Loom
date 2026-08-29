@@ -48,7 +48,7 @@ function concat(parts: Uint8Array[]): Uint8Array {
 }
 
 /** A deliberately small, uncompressed ZIP writer: portable and dependency-free. */
-function zip(files: Array<{ name: string; content: string }>): Uint8Array {
+export function zip(files: Array<{ name: string; content: string }>): Uint8Array {
   const localParts: Uint8Array[] = [], centralParts: Uint8Array[] = [];
   let offset = 0;
   for (const file of files) {
@@ -60,6 +60,16 @@ function zip(files: Array<{ name: string; content: string }>): Uint8Array {
   }
   const central = concat(centralParts);
   return concat([...localParts, central, u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(central.length), u32(offset), u16(0)]);
+}
+
+export async function exportProject(env:Env,principal:Principal,projectId:string):Promise<Response>{
+  const project=await env.DB.prepare(`SELECT x.id,x.name,x.description,x.read_audience,x.lifecycle_state FROM projects x JOIN project_members m ON m.project_id=x.id WHERE x.id=? AND m.participant_id=?`).bind(projectId,principal.participantId).first<Record<string,string>>();
+  if(!project)return problem(404,"not_found","Project not found");
+  if(project.read_audience!=="members_and_agents")return problem(403,"project_bodies_hidden","Project document bodies are not available to human members under this project's audience policy");
+  const rows=await env.DB.prepare(`SELECT d.id,d.title,d.logical_path,d.created_at,d.created_by_participant_id,d.source_document_id,v.id version_id,v.version_number,v.content,v.content_type,v.actor_id,v.created_at version_created_at FROM documents d JOIN document_versions v ON v.document_id=d.id WHERE d.owner_type='project' AND d.owner_id=? AND d.deleted_at IS NULL ORDER BY d.logical_path,d.id,v.version_number`).bind(projectId).all<Record<string,string|number|null>>();
+  const files:Array<{name:string;content:string}>=[],documents=new Map<string,Array<Record<string,string|number|null>>>();for(const row of rows.results){const list=documents.get(row.id as string)??[];list.push(row);documents.set(row.id as string,list)}
+  const manifest={schemaVersion:1,exportedAt:new Date().toISOString(),project,documents:[...documents.values()].map(revisions=>{const first=revisions[0],current=revisions[revisions.length-1],directory=`documents/${first.id}`;for(const revision of revisions)files.push({name:`${directory}/revisions/${String(revision.version_number).padStart(6,"0")}.${extension(revision.content_type as string)}`,content:revision.content as string});files.push({name:`${directory}/current.${extension(current.content_type as string)}`,content:current.content as string});return{id:first.id,title:first.title,logicalPath:first.logical_path,createdAt:first.created_at,createdBy:first.created_by_participant_id,sourceDocumentId:first.source_document_id,currentVersion:current.version_number,revisions:revisions.map(r=>({id:r.version_id,number:r.version_number,actorParticipantId:r.actor_id,createdAt:r.version_created_at}))}})};
+  files.unshift({name:"manifest.json",content:JSON.stringify(manifest,null,2)+"\n"});const body=zip(files);return new Response(body.buffer as ArrayBuffer,{headers:{"content-type":"application/zip","content-disposition":`attachment; filename="loom-project-${projectId}.zip"`,"cache-control":"private, no-store","x-content-type-options":"nosniff"}})
 }
 
 function extension(contentType: string): string {
