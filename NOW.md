@@ -27,4 +27,12 @@ This is the quick-fix drawer: things worth doing soon because they remove immedi
 - Do not rely on **Project activity** as the document's revision-history UI. Project activity answers what happened in the project; document history answers what happened to this document.
 - Reuse the existing revision/provenance model rather than introducing a second history system.
 
+## My Space — show project links
+
+- For each participant-owned document in **My Space**, show whether it is currently linked/contributed to projects and, when applicable, which projects.
+- Project names should be intelligible and preferably navigable rather than exposing raw IDs.
+- This display represents actual participant-owned contribution/link relationships only.
+- Do **not** treat project-owned copies as current links merely because they retain source provenance. A copied document is independent project-owned state, not an ongoing relationship to the source document.
+- Keep the first-pass presentation compact. Rich lifecycle distinctions can remain secondary unless they are needed to avoid misleading the user.
+
 These are UX changes around settled document and ownership semantics, not changes to the ownership model itself.
