@@ -75,3 +75,4 @@ data and are not recorded here.
 - Added fixed 72-hour creator deletion deadlines, former-member deletion controls, exact deadline/account-lifecycle enforcement, and archive- and role-aware commit-time mutation guards.
 - Added project-native creation, reading, editing, metadata management, deletion, copy, activity/history, export, migration, UI, and regression coverage.
 - Closed human `agents_only` body access through native-document history and project export, made copy-source validation commit-authoritative, aligned document controls with live authority, split metadata/content saves, and preserved deletion-time titles in project activity.
+- Corrected migration 0007 to rebuild revision/event child tables safely before replacing `documents`, preserving existing revisions, metadata history, and contribution relationships during upgrades.

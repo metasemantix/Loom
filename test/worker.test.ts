@@ -44,6 +44,10 @@ beforeEach(async () => {
   await env.DB.exec("DELETE FROM account_events; DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
 });
 
+describe("migration 0007 upgrade safety",()=>{
+  it("preserves existing participant documents, revisions, metadata events, and contributions",()=>{const result=(globalThis as typeof globalThis & {__loomMigrationRegression:{before:unknown;after:unknown;foreignKeyErrors:unknown[]}}).__loomMigrationRegression;expect(result.after).toEqual(result.before);expect(result.foreignKeyErrors).toEqual([])})
+});
+
 async function invite(projectId:string, inviter:{cookie:string}, recipient:{cookie:string}) {
   const created=await SELF.fetch(`${origin}/api/projects/${projectId}/invitations`,{method:"POST",headers:{cookie:inviter.cookie,origin}});
   expect(created.status).toBe(201);const token=(await created.json<{invitation:{token:string}}>()).invitation.token;
