@@ -8,7 +8,7 @@ import { getProfile, updateProfile } from "./profile";
 import { changeRole, createInvitation, createProject, getProject, linkDocument, listOwnedContributions, listProjects, previewInvitation, reauthorizeContribution, removeMember, respondInvitation, revokeInvitation, setProjectLifecycle, recoverOwnerlessProject, transferOwnership, unlinkDocument, updateProject } from "./projects";
 import { accountLifecycle, cancelDeletion, finalizeDueAccounts, provenanceIdentifier, scheduleDeletion } from "./accounts";
 import { deletionPage } from "./ui";
-import { createProjectDocument, deleteProjectDocument, listCreatorEntitlements, projectDocumentHistory, readProjectDocument, updateProjectDocument, updateProjectDocumentMetadata } from "./project-documents";
+import { createProjectDocument, deleteProjectDocument, listCreatorEntitlements, projectDocumentHistory, readProjectDocument, updateProjectDocument, updateProjectDocumentMetadata, uploadProjectDocument } from "./project-documents";
 import { exportProject } from "./export";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
@@ -156,6 +156,8 @@ export default {
     if (linkMatch && request.method === "DELETE") return unlinkDocument(env, principal, linkMatch[1], linkMatch[2]);
     const nativeCollectionMatch=path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/native-documents$/);
     if(nativeCollectionMatch&&request.method==="POST")return createProjectDocument(request,env,principal,nativeCollectionMatch[1]);
+    const nativeUploadMatch=path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/native-documents\/upload$/);
+    if(nativeUploadMatch&&request.method==="POST")return uploadProjectDocument(request,env,principal,nativeUploadMatch[1]);
     const copyMatch=path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/native-documents\/copy\/(doc_[a-z0-9]+)$/);
     if(copyMatch&&request.method==="POST")return createProjectDocument(request,env,principal,copyMatch[1],copyMatch[2]);
     const nativeMatch=path.match(/^\/api\/project-documents\/(doc_[a-z0-9]+)$/);

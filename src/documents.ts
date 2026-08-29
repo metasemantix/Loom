@@ -33,7 +33,14 @@ function validPath(value: unknown): value is string {
 
 export async function listDocuments(env: Env, principal: Principal): Promise<Response> {
   const rows = await env.DB.prepare(`${currentDocuments} ORDER BY d.logical_path,d.id`).bind(principal.participantId).all<DocumentRow>();
-  return json({ documents: rows.results });
+  const links = await env.DB.prepare(`SELECT pd.document_id,p.id project_id,p.name project_name,pd.state,
+    EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.participant_id=?) can_open_project
+    FROM project_documents pd JOIN projects p ON p.id=pd.project_id
+    WHERE pd.source_owner_participant_id=? AND pd.state!='retracted'
+    ORDER BY p.name,p.id`).bind(principal.participantId,principal.participantId).all<{document_id:string;project_id:string;project_name:string;state:string;can_open_project:number}>();
+  const byDocument=new Map<string,Array<Record<string,unknown>>>();
+  for(const link of links.results){const list=byDocument.get(link.document_id)??[];list.push({project_id:link.project_id,project_name:link.project_name,state:link.state,can_open_project:Boolean(link.can_open_project)});byDocument.set(link.document_id,list)}
+  return json({ documents: rows.results.map(document=>({...document,project_links:byDocument.get(document.id)??[]})) });
 }
 
 /** Human reading endpoint. Owners may always read; other participants need an

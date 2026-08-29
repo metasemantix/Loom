@@ -41,6 +41,12 @@ For consequential controls, test both:
 
 Continue to verify rendered inline browser JavaScript as required by `AGENTS.md`.
 
+For project-document UX, acceptance inventory distinguishes project-owned write,
+direct-upload, and copy creation branches from participant-owned contribution.
+It also covers Loom-assigned creation paths, per-document revision/metadata
+history, and owner-side contribution discovery; source provenance on an
+independent project-owned copy is not a contribution-discovery relationship.
+
 ## When tests expose discrepancies
 
 A failing acceptance test is evidence to investigate, not something to silence.
