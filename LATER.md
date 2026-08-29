@@ -254,3 +254,7 @@ These may become useful later. They should not prevent Loom from first becoming 
 ## Account-deletion notifications
 
 Use the structured account, project, and contribution lifecycle events to notify project heads/admins when final account deletion affects their project. This account-lifecycle slice deliberately does not introduce a general notification subsystem.
+
+## Project-native per-document audiences
+
+Project-native documents currently inherit the project's single `members_and_agents` or `agents_only` read audience. Whether a project should later support per-document audience controls is an open design question. Do not infer a document ACL model, permission precedence, or agent/human exception from the current project-wide setting without a dedicated architecture decision.
