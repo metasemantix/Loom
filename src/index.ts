@@ -3,11 +3,13 @@ import { context, createDocument, deleteDocument, history, listDocuments, readDo
 import { json, parseCookies, problem, requireSameOrigin } from "./http";
 import type { Env } from "./types";
 import { exportSpace } from "./export";
-import { controlRoomPage, documentPage, invitationPage, loginPage, projectsPage, spacePage } from "./ui";
+import { controlRoomPage, documentPage, invitationPage, loginPage, projectsPage, projectDocumentPage, spacePage } from "./ui";
 import { getProfile, updateProfile } from "./profile";
 import { changeRole, createInvitation, createProject, getProject, linkDocument, listOwnedContributions, listProjects, previewInvitation, reauthorizeContribution, removeMember, respondInvitation, revokeInvitation, setProjectLifecycle, recoverOwnerlessProject, transferOwnership, unlinkDocument, updateProject } from "./projects";
 import { accountLifecycle, cancelDeletion, finalizeDueAccounts, provenanceIdentifier, scheduleDeletion } from "./accounts";
 import { deletionPage } from "./ui";
+import { createProjectDocument, deleteProjectDocument, listCreatorEntitlements, projectDocumentHistory, readProjectDocument, updateProjectDocument, updateProjectDocumentMetadata } from "./project-documents";
+import { exportProject } from "./export";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -112,6 +114,8 @@ export default {
     if (request.method === "GET" && path === "/projects") return projectsPage();
     const humanDocumentMatch = path.match(/^\/documents\/(doc_[a-z0-9]+)$/);
     if (humanDocumentMatch && request.method === "GET") return documentPage(humanDocumentMatch[1], url.searchParams.get("project"));
+    const projectDocumentPageMatch=path.match(/^\/project-documents\/(doc_[a-z0-9]+)$/);
+    if(projectDocumentPageMatch&&request.method==="GET")return projectDocumentPage(projectDocumentPageMatch[1]);
     const declineMatch = path.match(/^\/api\/invitations\/(inv_[a-z0-9]+)\/decline$/);
     if (request.method === "GET" && path === "/api/me") return json({ user: { id: principal.userId, displayName: principal.displayName }, participant: { id: principal.participantId } });
     if (request.method === "GET" && path === "/api/me/profile") return getProfile(env, principal);
@@ -132,6 +136,7 @@ export default {
     if (metadataMatch && request.method === "PUT") return updateMetadata(request, env, principal, metadataMatch[1]);
     if (request.method === "GET" && path === "/api/projects") return listProjects(env, principal);
     if (request.method === "GET" && path === "/api/me/contributions") return listOwnedContributions(env, principal);
+    if (request.method === "GET" && path === "/api/me/project-document-entitlements") return listCreatorEntitlements(env, principal);
     if (request.method === "POST" && path === "/api/projects") return createProject(request, env, principal);
     const projectMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)$/);
     if (projectMatch && request.method === "GET") return getProject(env, principal, projectMatch[1]);
@@ -149,6 +154,20 @@ export default {
     if (linksMatch && request.method === "POST") return linkDocument(request, env, principal, linksMatch[1]);
     const linkMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/documents\/(doc_[a-z0-9]+)$/);
     if (linkMatch && request.method === "DELETE") return unlinkDocument(env, principal, linkMatch[1], linkMatch[2]);
+    const nativeCollectionMatch=path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/native-documents$/);
+    if(nativeCollectionMatch&&request.method==="POST")return createProjectDocument(request,env,principal,nativeCollectionMatch[1]);
+    const copyMatch=path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/native-documents\/copy\/(doc_[a-z0-9]+)$/);
+    if(copyMatch&&request.method==="POST")return createProjectDocument(request,env,principal,copyMatch[1],copyMatch[2]);
+    const nativeMatch=path.match(/^\/api\/project-documents\/(doc_[a-z0-9]+)$/);
+    if(nativeMatch&&request.method==="GET")return readProjectDocument(env,principal,nativeMatch[1]);
+    if(nativeMatch&&request.method==="PUT")return updateProjectDocument(request,env,principal,nativeMatch[1]);
+    if(nativeMatch&&request.method==="DELETE")return deleteProjectDocument(env,principal,nativeMatch[1]);
+    const nativeMetadata=path.match(/^\/api\/project-documents\/(doc_[a-z0-9]+)\/metadata$/);
+    if(nativeMetadata&&request.method==="PUT")return updateProjectDocumentMetadata(request,env,principal,nativeMetadata[1]);
+    const nativeHistory=path.match(/^\/api\/project-documents\/(doc_[a-z0-9]+)\/versions$/);
+    if(nativeHistory&&request.method==="GET")return projectDocumentHistory(env,principal,nativeHistory[1]);
+    const projectExport=path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/export$/);
+    if(projectExport&&request.method==="GET")return exportProject(env,principal,projectExport[1]);
     const reauthorizeMatch = path.match(/^\/api\/me\/contributions\/(prj_[a-z0-9]+)\/(doc_[a-z0-9]+)\/reauthorize$/);
     if (reauthorizeMatch && request.method === "POST") return reauthorizeContribution(env, principal, reauthorizeMatch[1], reauthorizeMatch[2]);
     const archiveMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/(archive|unarchive)$/);
