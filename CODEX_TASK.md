@@ -1,25 +1,22 @@
 # Current Codex Task
 
-Implement the next bounded Loom slice: **deterministic acceptance harness**.
+Implement the current bounded Loom slice: **project document UX quick fixes**.
 
-Read `AGENTS.md` and `docs/TESTING_MODEL.md` first, then the settled architecture, current implementation, migrations, and existing tests they require.
+Read `AGENTS.md`, `NOW.md`, `docs/TESTING_MODEL.md`, and the settled document/project architecture before changing code. Treat existing ownership, contribution, provenance, audience, lifecycle, and creator-deletion semantics as authoritative.
 
 ## Goal
 
-Turn the testing model into executable infrastructure for the Loom functionality that exists now.
+Implement the current items in `NOW.md` as one focused UX pass:
 
-- Inventory current consequential operations and their meaningful decision branches. Give branches stable, searchable acceptance-case names and make missing coverage visible.
-- Build a deterministic reusable populated reference test world with stable IDs/readable aliases and the important current participant, project, document, contribution, invitation, lifecycle, audience, provenance, copy, and creator-entitlement states.
-- Make deadline-sensitive tests deterministic rather than wall-clock dependent.
-- Keep historical migration fixtures separate; preserve the populated pre-0007 migration regression.
-- Exercise UI wiring separately from operation semantics where the existing DOM harness permits it.
+- Make project document actions compact/collapsed.
+- Group **write new**, direct **upload**, and **copy from My Space** under **Create project-owned document**; all three produce project-owned documents.
+- Keep participant-owned **Add my document to project** visibly separate because it creates/maintains a contribution relationship rather than project ownership.
+- Stop asking users to supply `logical_path` during ordinary project-owned document creation. Assign a sensible Loom-side default; preserve explicit rename/move for later organization.
+- Give project-owned documents a discoverable per-document revision-history view using the existing revision/provenance model rather than Project activity as a substitute.
+- In **My Space**, show which projects currently have a participant-owned document linked/contributed. Do not count independent project-owned copies as links merely because they retain source provenance.
 
-Use the harness to test the implementation as it exists. If a test exposes a clear conflict with settled architecture, fix the implementation narrowly and retain the regression. If policy is ambiguous, report it rather than guessing or weakening the test.
+Preserve existing copy independence and all settled authorization/lifecycle behavior. Do not redesign ownership semantics or begin project deletion in this slice.
 
-Explicitly include the three known project-native coverage gaps: admin create/edit; creator voluntary leave while the 72-hour delete entitlement remains live without ordinary project access; and deleted creator/revision-actor provenance with the project-owned document surviving.
+Update affected acceptance/operation coverage under `docs/TESTING_MODEL.md`. Add regression tests for new behavior and UI wiring where practical, using the existing harness rather than weakening expectations to fit the implementation.
 
-Do not add new product semantics, unrelated features, or a heavyweight test framework.
-
-Run the complete normal validation from `AGENTS.md`. `npm test` must include the acceptance suite.
-
-At completion, report the acceptance structure/reference world created, previously missing branches covered, defects discovered and fixes made, ambiguities left unresolved, and validation results.
+Run the complete validation required by `AGENTS.md`. At completion, report what changed, tests added/updated, any defects or ambiguities discovered, and validation results.
