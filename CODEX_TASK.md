@@ -1,48 +1,40 @@
 # Current Codex Task
 
-Implement the current bounded Loom slice: **scheduled project deletion and provenance shell**.
+Implement the current bounded Loom slice: **local-development authentication bypass for developer QoL**.
 
-Read `AGENTS.md`, `docs/PROJECT_LIFECYCLE.md`, `docs/PROJECT_NATIVE_DOCUMENTS.md`, `docs/CONTRIBUTION_LIFECYCLE.md`, `docs/TESTING_MODEL.md`, and relevant decisions in `DECISIONS.md` before changing code. Treat those settled ownership, lifecycle, provenance, account-deletion, and authorization semantics as authoritative.
+Read and follow `AGENTS.md` and inspect the existing authentication/session architecture before changing code. Preserve all existing production authentication and authorization semantics.
 
 ## Goal
 
-Implement project deletion end to end according to `docs/PROJECT_LIFECYCLE.md`.
+Make local Loom usable without going through Discord on every development machine while continuing to exercise Loom's real participant/session/authorization machinery.
 
-The slice includes:
+## Required behavior
 
-- owner-only scheduling of project deletion with exact current-project-title confirmation;
-- a fixed three-day project deletion deadline;
-- immediate archived behavior while deletion is pending;
-- owner-only cancellation before the deadline, returning to ordinary archived state;
-- preventing admins or ordinary archived-project recovery/unarchive paths from reviving a deletion-scheduled project;
-- server-authoritative deadline and lifecycle checks at mutation/finalization boundaries;
-- finalization into a terminal provenance shell;
-- destruction of project-owned document bodies and revision content/diffs while retaining only the permitted shell/history metadata;
-- preservation of participant-owned source documents while ending project-mediated access and retaining only permitted contribution provenance/tombstones;
-- safe interaction with account deletion so worker/finalizer ordering cannot create a recovery loophole or reverse the intended project-before-account deadline ordering;
-- human UI sufficient to schedule, inspect, and cancel pending deletion with clear deadline/state presentation.
-
-Do not implement a general notification subsystem in this slice. Preserve structured lifecycle events/state so notifications can consume them later.
+- Add an explicit local-development auth mode controlled by a local development variable such as `DEV_AUTH_BYPASS=1`.
+- The bypass must be impossible to activate in deployed/non-local Loom merely by setting that variable. Require both the explicit opt-in and a trustworthy local-development condition such as localhost/Wrangler-local execution, and fail closed otherwise.
+- Do **not** bypass Loom authorization checks. Instead, establish a normal Loom session for one fixed deterministic development participant so ownership, project roles, archive/deletion rules, and all existing authorization behavior continue to run normally.
+- If the deterministic development participant is missing from a fresh local database, create it automatically with stable deterministic identity/provenance suitable for repeated local use.
+- Reuse the same participant on subsequent starts; do not create duplicates.
+- Keep this first version deliberately single-user. Do not add identity switching or multi-user reference-world controls in this slice.
+- In dev-auth mode, visiting local Loom should require no Discord interaction. Establish/use the development session automatically and proceed into the application.
+- Make active dev-auth mode clearly visible in the local UI with a small conspicuous `DEV AUTH` indicator so there is no ambiguity about which authentication mode is active.
+- With the bypass disabled, existing Discord authentication behavior must remain unchanged.
+- Document the local-development option in `README.md` and `.dev.vars.example`. Do not commit real secrets.
 
 ## Acceptance and regression requirements
 
-Extend the operation/decision-tree acceptance catalog and deterministic reference world as needed. Cover at minimum:
+Add focused tests covering at minimum:
 
-- owner vs admin/member deletion scheduling;
-- exact-title confirmation success/failure;
-- scheduling from active and archived states;
-- three-day deadline behavior, including exact deadline boundary;
-- allowed archived-project operations while deletion is pending;
-- forbidden mutation/unarchive/role/ownership operations while deletion is pending;
-- owner cancellation before deadline and denial at/after deadline;
-- cancel then reschedule producing a fresh fixed three-day deadline;
-- final shell contents and terminal behavior;
-- POD body/revision-content destruction with non-content revision/provenance history retained;
-- OOD source survival and loss of project-mediated body access;
-- outstanding invitation revocation/non-revival;
-- owner account deletion/finalization ordering and race cases;
-- migration from populated existing schemas without data loss or accidental cascade behavior.
+- bypass disabled -> existing authentication behavior remains unchanged;
+- bypass enabled in genuine local development -> deterministic development participant/session is established;
+- missing development participant is created automatically;
+- existing development participant is reused rather than duplicated;
+- non-local/deployed context cannot activate the bypass even when `DEV_AUTH_BYPASS=1` is present;
+- authenticated requests after dev login still resolve identity through normal Loom participant/session machinery and do not skip authorization checks;
+- the local UI visibly identifies dev-auth mode.
 
-Use the existing clock/test seams and acceptance harness rather than weakening expectations to fit implementation. Add focused worker/integration/UI regressions where they provide coverage the acceptance harness does not.
+Use the existing testing conventions and browser/rendered-JS guidance in `AGENTS.md`. Investigate discrepancies rather than weakening tests or inventing new production auth policy.
 
-Run the complete validation required by `AGENTS.md`. At completion, report what changed, tests added or updated, any implementation defects or genuine architecture ambiguities discovered, migration behavior, and validation results.
+Do not expand this slice into agent authentication, production auth redesign, multi-user dev switching, reference-world identity switching, notifications, or unrelated setup tooling.
+
+Run all validation required by `AGENTS.md`. At completion, report what changed, tests added or updated, any defects or genuine architecture ambiguities discovered, and validation results.
