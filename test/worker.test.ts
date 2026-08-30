@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import worker from "../src/index";
+import { DEV_PARTICIPANT_ID, DEV_USER_ID } from "../src/dev-auth";
 
 const origin = "http://example.com";
 
@@ -42,6 +44,56 @@ async function zipFiles(response: Response): Promise<Map<string, string>> {
 
 beforeEach(async () => {
   await env.DB.exec("DELETE FROM account_events; DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
+});
+
+describe("local development authentication", () => {
+  const local = "http://localhost:8787";
+  const devEnv = () => ({ ...env, DEV_AUTH_BYPASS: "1" });
+  const cookieFrom = (response: Response) => response.headers.get("set-cookie")!.split(";", 1)[0];
+
+  it("leaves Discord authentication unchanged when bypass is disabled", async () => {
+    const response = await worker.fetch(new Request(`${local}/me`), env);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(`${local}/login`);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("creates a deterministic participant and an ordinary resolvable session", async () => {
+    const login = await worker.fetch(new Request(`${local}/me`), devEnv());
+    expect(login.status).toBe(302);
+    const cookie = cookieFrom(login);
+    expect(await env.DB.prepare("SELECT id,user_id,provenance_identifier FROM participants WHERE id=?").bind(DEV_PARTICIPANT_ID).first()).toEqual({ id: DEV_PARTICIPANT_ID, user_id: DEV_USER_ID, provenance_identifier: "local-development" });
+    const me = await worker.fetch(new Request(`${local}/api/me`, { headers: { cookie } }), devEnv());
+    expect(me.status).toBe(200);
+    expect(await me.json()).toMatchObject({ user: { id: DEV_USER_ID }, participant: { id: DEV_PARTICIPANT_ID } });
+  });
+
+  it("reuses the existing development participant without duplicates", async () => {
+    await worker.fetch(new Request(`${local}/me`), devEnv());
+    await worker.fetch(new Request(`${local}/projects`), devEnv());
+    expect((await env.DB.prepare("SELECT count(*) count FROM participants WHERE provenance_identifier='local-development'").first<{count:number}>())?.count).toBe(1);
+    expect((await env.DB.prepare("SELECT count(*) count FROM users WHERE id=?").bind(DEV_USER_ID).first<{count:number}>())?.count).toBe(1);
+  });
+
+  it("fails closed on a non-local hostname even when opted in", async () => {
+    const response = await worker.fetch(new Request("https://loom.example/me"), devEnv());
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("https://loom.example/login");
+    expect(await env.DB.prepare("SELECT id FROM participants WHERE id=?").bind(DEV_PARTICIPANT_ID).first()).toBeNull();
+  });
+
+  it("keeps ownership authorization active and visibly labels rendered dev mode", async () => {
+    const other = await participant("other_owner"), otherDocument = await create(other.cookie);
+    const login = await worker.fetch(new Request(`${local}/me`), devEnv()), cookie = cookieFrom(login);
+    const denied = await worker.fetch(new Request(`${local}/api/me/documents/${otherDocument}`, { method: "DELETE", headers: { cookie, origin: local } }), devEnv());
+    expect(denied.status).toBe(404);
+    expect(await env.DB.prepare("SELECT id FROM documents WHERE id=?").bind(otherDocument).first()).toBeTruthy();
+    const page = await worker.fetch(new Request(`${local}/me`, { headers: { cookie } }), devEnv());
+    const html = await page.text();
+    expect(html).toContain('<strong class="dev-auth" role="status">DEV AUTH</strong>');
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
+    for (const script of scripts) expect(() => new Function(script)).not.toThrow();
+  });
 });
 
 describe("migration 0007 upgrade safety",()=>{

@@ -11,6 +11,7 @@ import { deletionPage } from "./ui";
 import { createProjectDocument, deleteProjectDocument, listCreatorEntitlements, projectDocumentHistory, readProjectDocument, updateProjectDocument, updateProjectDocumentMetadata, uploadProjectDocument } from "./project-documents";
 import { exportProject } from "./export";
 import { cancelProjectDeletion, scheduleProjectDeletion } from "./project-deletion";
+import { devAuthEnabled, establishDevSession, markDevAuth } from "./dev-auth";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -76,8 +77,7 @@ async function discordCallback(request: Request, env: Env): Promise<Response> {
   return new Response(null, { status: 302, headers: { location, "set-cookie": sessionCookie(secret) } });
 }
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+async function handleRequest(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url), path = url.pathname;
     if (request.method === "GET" && path === "/") return Response.redirect(`${url.origin}/me`, 302);
     if (request.method === "GET" && path === "/login") return loginPage();
@@ -181,6 +181,14 @@ export default {
     if(projectDeletionMatch&&request.method==="POST")return scheduleProjectDeletion(request,env,principal,projectDeletionMatch[1]);
     if(projectDeletionMatch&&request.method==="DELETE")return cancelProjectDeletion(env,principal,projectDeletionMatch[1]);
     return problem(404, "not_found", "Route not found");
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const devSession = await establishDevSession(request, env);
+    if (devSession) return devSession;
+    const response = await handleRequest(request, env);
+    return devAuthEnabled(request, env) ? markDevAuth(response) : response;
   },
   async scheduled(_controller:ScheduledController,env:Env):Promise<void>{await finalizeDueAccounts(env)},
 } satisfies ExportedHandler<Env>;

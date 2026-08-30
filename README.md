@@ -23,17 +23,27 @@ changes.
    ```
 
 3. Install dependencies with `npm install`.
-4. Create a Discord application if needed and add
-   `http://localhost:8787/auth/discord/callback` as an OAuth redirect URI.
-5. Copy `.dev.vars.example` to `.dev.vars` and supply the application ID and
-   secret. `.dev.vars` is local-only and is deliberately not supplied by Git.
+4. Choose a local authentication setup:
+   - For zero-setup, single-user development, uncomment `DEV_AUTH_BYPASS=1` in
+     `.dev.vars`. Loom creates and reuses one deterministic local participant,
+     establishes ordinary database-backed sessions, and continues to enforce all
+     normal authorization rules. The bypass only activates on localhost/loopback;
+     setting the variable on a deployed hostname has no effect. Active pages show
+     a conspicuous `DEV AUTH` badge.
+   - To exercise Discord OAuth, create a Discord application and add
+     `http://localhost:8787/auth/discord/callback` as an OAuth redirect URI.
+5. Copy `.dev.vars.example` to `.dev.vars` and enable the selected option. Supply
+   the Discord application ID and secret only when using OAuth. `.dev.vars` is
+   local-only and is deliberately not supplied by Git. Never enable the bypass as
+   a substitute for production authentication.
 6. Create/update the local D1 database by applying all migrations:
 
    ```sh
    npm exec wrangler d1 migrations apply loom --local
    ```
 
-7. Start the Worker with `npm run dev`, then open `http://localhost:8787/login`.
+7. Start the Worker with `npm run dev`, then open `http://localhost:8787/`. Dev
+   auth enters Loom automatically; otherwise Loom presents the Discord sign-in.
 
 On Windows PowerShell, an execution policy may block `npm.ps1` even when Node.js
 is installed correctly. In that case use `npm.cmd` / `npx.cmd`, or run the npm
