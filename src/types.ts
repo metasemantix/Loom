@@ -4,6 +4,7 @@ export interface Env {
   DISCORD_CLIENT_SECRET: string;
   DISCORD_REDIRECT_URI: string;
   ACCOUNT_DELETION_GRACE_SECONDS?: string;
+  DEV_AUTH_BYPASS?: string;
 }
 
 export interface Principal {
