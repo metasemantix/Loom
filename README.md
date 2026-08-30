@@ -12,14 +12,36 @@ changes.
 
 ## Local development
 
-1. Create a Discord application and add
-   `http://localhost:8787/auth/discord/callback` as an OAuth redirect URI.
-2. Copy `.dev.vars.example` to `.dev.vars` and supply the application ID and
-   secret.
+### Fresh machine setup
+
+1. Install Git and the current Node.js LTS release. Node.js includes `npm`.
+2. Clone the repository and enter it:
+
+   ```sh
+   git clone https://github.com/metasemantix/Loom.git
+   cd Loom
+   ```
+
 3. Install dependencies with `npm install`.
-4. Create the local database with
-   `npm exec wrangler d1 migrations apply loom --local`.
-5. Start the Worker with `npm run dev`, then open `http://localhost:8787/login`.
+4. Create a Discord application if needed and add
+   `http://localhost:8787/auth/discord/callback` as an OAuth redirect URI.
+5. Copy `.dev.vars.example` to `.dev.vars` and supply the application ID and
+   secret. `.dev.vars` is local-only and is deliberately not supplied by Git.
+6. Create/update the local D1 database by applying all migrations:
+
+   ```sh
+   npm exec wrangler d1 migrations apply loom --local
+   ```
+
+7. Start the Worker with `npm run dev`, then open `http://localhost:8787/login`.
+
+On Windows PowerShell, an execution policy may block `npm.ps1` even when Node.js
+is installed correctly. In that case use `npm.cmd` / `npx.cmd`, or run the npm
+commands from Command Prompt, rather than changing the machine's execution
+policy just for Loom.
+
+When returning to an existing clone, pull the latest code, run `npm install` if
+dependencies changed, and re-apply local migrations before starting Loom.
 
 Run `npm test` for authorization and ownership integration tests, and
 `npm run typecheck` for static checks.
