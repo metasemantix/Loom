@@ -6,6 +6,7 @@ import projectLifecycle from "../migrations/0004_project_lifecycle.sql?raw";
 import accountLifecycle from "../migrations/0005_account_lifecycle.sql?raw";
 import minimalTombstones from "../migrations/0006_minimal_participant_tombstones.sql?raw";
 import projectNativeDocuments from "../migrations/0007_project_native_documents.sql?raw";
+import projectDeletion from "../migrations/0008_scheduled_project_deletion.sql?raw";
 
 function statements(sql:string){const result:string[]=[],lines:string[]=[],flush=()=>{const value=lines.join("\n").trim().replace(/;$/,"");lines.length=0;if(value)result.push(value)};let trigger=false;for(const line of sql.split("\n")){if(/^CREATE TRIGGER\b/.test(line.trim()))trigger=true;lines.push(line);if(trigger?/^END;$/.test(line.trim()):line.trim().endsWith(";")){flush();trigger=false}}flush();return result}
 async function apply(sql:string){for(const statement of statements(sql))await env.DB.prepare(statement).run()}
@@ -29,9 +30,12 @@ const snapshot=async()=>({
   versions:(await env.DB.prepare(`SELECT id,version_number,content FROM document_versions WHERE document_id='doc_migration' ORDER BY version_number`).all()).results,
   event:await env.DB.prepare(`SELECT id,document_id,event_type,changes_json FROM document_events WHERE id='dev_migration'`).first(),
   contribution:await env.DB.prepare(`SELECT project_id,document_id,source_owner_participant_id,state FROM project_documents WHERE project_id='prj_migration' AND document_id='doc_migration'`).first(),
+  membership:await env.DB.prepare(`SELECT project_id,participant_id,role,joined_at FROM project_members WHERE project_id='prj_migration' AND participant_id='par_migration'`).first(),
 });
 const before=await snapshot();
 await apply(projectNativeDocuments);
 const after=await snapshot();
+await apply(projectDeletion);
+const afterProjectDeletionMigration=await snapshot();
 const foreignKeyErrors=(await env.DB.prepare(`PRAGMA foreign_key_check`).all()).results;
-(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,foreignKeyErrors};
+(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,foreignKeyErrors};

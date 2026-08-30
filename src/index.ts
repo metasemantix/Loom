@@ -10,6 +10,7 @@ import { accountLifecycle, cancelDeletion, finalizeDueAccounts, provenanceIdenti
 import { deletionPage } from "./ui";
 import { createProjectDocument, deleteProjectDocument, listCreatorEntitlements, projectDocumentHistory, readProjectDocument, updateProjectDocument, updateProjectDocumentMetadata, uploadProjectDocument } from "./project-documents";
 import { exportProject } from "./export";
+import { cancelProjectDeletion, scheduleProjectDeletion } from "./project-deletion";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -176,6 +177,9 @@ export default {
     if (archiveMatch && request.method === "POST") return setProjectLifecycle(env, principal, archiveMatch[1], archiveMatch[2] === "archive" ? "archived" : "active");
     const recoveryMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/recover$/);
     if (recoveryMatch && request.method === "POST") return recoverOwnerlessProject(env, principal, recoveryMatch[1]);
+    const projectDeletionMatch=path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/deletion$/);
+    if(projectDeletionMatch&&request.method==="POST")return scheduleProjectDeletion(request,env,principal,projectDeletionMatch[1]);
+    if(projectDeletionMatch&&request.method==="DELETE")return cancelProjectDeletion(env,principal,projectDeletionMatch[1]);
     return problem(404, "not_found", "Route not found");
   },
   async scheduled(_controller:ScheduledController,env:Env):Promise<void>{await finalizeDueAccounts(env)},
