@@ -90,9 +90,13 @@ or another normal terminal:
    with `npm run db:migrate:production` **before creating or deploying any Worker
    version**. This command changes D1 only and does not expose the Worker.
 5. Bootstrap the Worker without putting an unusable version into production
-   traffic: run `npm exec wrangler versions upload --config
-   wrangler.production.jsonc`. This creates the Worker resource and an undeployed
-   version. Then run `npm exec wrangler versions secret put
+   traffic: run `npm run deploy:bootstrap`. This uses the deliberately minimal
+   tracked `wrangler.production-bootstrap.jsonc`, which has the same Worker name
+   but no bindings and no required-secret declaration, to create the Worker
+   resource and an undeployed version. The bootstrap config exists only because
+   a brand-new Worker cannot satisfy the canonical config's required-secret check
+   until it has a version to which Wrangler can add the first secret. Never deploy
+   the bootstrap version. Then run `npm exec -- wrangler versions secret put
    DISCORD_CLIENT_SECRET --config wrangler.production.jsonc` and paste the secret
    only at Wrangler's prompt. The `versions secret` command creates another
    undeployed version; unlike ordinary `wrangler secret put`, it does not deploy
