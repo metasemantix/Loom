@@ -22,10 +22,15 @@ export async function scheduleProjectDeletion(request:Request,env:Env,p:Principa
   return json({project:{id,status:"archived",deletionScheduledAt:now,deletionDueAt:due}},201);
 }
 
-export async function cancelProjectDeletion(env:Env,p:Principal,id:string,clock=new Date()):Promise<Response>{
+export async function cancelProjectDeletion(env:Env,p:Principal,id:string,clock=new Date(),testAuthorizationTime?:Date):Promise<Response>{
   const now=clock.toISOString(),transition=opaque("trn");
+  // Production deliberately asks SQLite for time inside the decisive UPDATE.
+  // The optional value is only a deterministic authorization-time seam for
+  // commit-boundary tests; request/preflight time never authorizes production.
+  const authorizationClock=testAuthorizationTime?"?":`strftime('%Y-%m-%dT%H:%M:%fZ','now')`;
+  const cancellation=env.DB.prepare(`UPDATE projects SET deletion_scheduled_at=NULL,deletion_due_at=NULL,deletion_scheduled_by_participant_id=NULL,lifecycle_transition_id=? WHERE id=? AND lifecycle_state='archived' AND deletion_due_at>${authorizationClock} AND EXISTS(SELECT 1 FROM project_members WHERE project_id=? AND participant_id=? AND role='owner')`);
   const results=await env.DB.batch([
-    env.DB.prepare(`UPDATE projects SET deletion_scheduled_at=NULL,deletion_due_at=NULL,deletion_scheduled_by_participant_id=NULL,lifecycle_transition_id=? WHERE id=? AND lifecycle_state='archived' AND deletion_due_at>? AND EXISTS(SELECT 1 FROM project_members WHERE project_id=? AND participant_id=? AND role='owner')`).bind(transition,id,now,id,p.participantId),
+    testAuthorizationTime?cancellation.bind(transition,id,testAuthorizationTime.toISOString(),id,p.participantId):cancellation.bind(transition,id,id,p.participantId),
     env.DB.prepare(`INSERT INTO project_events(id,project_id,event_type,actor_participant_id,details_json,created_at) SELECT ?,?,'project_deletion_cancelled',?,'{}',? FROM projects WHERE id=? AND lifecycle_transition_id=?`).bind(opaque("pev"),id,p.participantId,now,id,transition)
   ]);
   if(!results[0].meta.changes){const row=await env.DB.prepare(`SELECT lifecycle_state,deletion_due_at,(SELECT role FROM project_members WHERE project_id=projects.id AND participant_id=?) role FROM projects WHERE id=?`).bind(p.participantId,id).first<{lifecycle_state:string;deletion_due_at:string|null;role:string|null}>();if(!row||!row.role)return problem(404,"not_found","Project not found");if(row.role!=="owner")return problem(403,"forbidden","Only the project owner may cancel deletion");return problem(409,"deletion_irreversible","The deletion deadline has passed or deletion is not pending")}

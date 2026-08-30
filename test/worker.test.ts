@@ -575,6 +575,17 @@ describe("scheduled account lifecycle", () => {
 describe("project-native documents",()=>{
   async function project(owner:{cookie:string}){const r=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Native",readAudience:"members_and_agents"})});return (await r.json<any>()).project.id}
   async function native(projectId:string,actor:{cookie:string},body:any={title:"Shared",logicalPath:"shared.md",content:"one",contentType:"text/markdown"}){return SELF.fetch(`${origin}/api/projects/${projectId}/native-documents`,{method:"POST",headers:{cookie:actor.cookie,origin,"content-type":"application/json"},body:JSON.stringify(body)})}
+  it("authorizes project-deletion cancellation at database mutation time",async()=>{
+    const alice=await participant("alice"),id=await project(alice),principal={userId:alice.userId,participantId:alice.id,displayName:"User alice",accountState:"active" as const,deletionDueAt:null};
+    const {scheduleProjectDeletion,cancelProjectDeletion}=await import("../src/project-deletion"),schedule=(at:Date)=>scheduleProjectDeletion(new Request(`${origin}/schedule`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({title:"Native"})}),env,principal,id,at);
+    const firstAt=new Date("2029-01-01T00:00:00.000Z");expect((await schedule(firstAt)).status).toBe(201);
+    expect((await cancelProjectDeletion(env,principal,id,new Date("2029-01-02T00:00:00.000Z"),new Date("2029-01-02T00:00:00.000Z"))).status).toBe(200);
+    expect(await env.DB.prepare(`SELECT lifecycle_state,deletion_due_at FROM projects WHERE id=?`).bind(id).first()).toEqual({lifecycle_state:"archived",deletion_due_at:null});
+    const secondAt=new Date("2029-01-03T00:00:00.000Z");expect((await schedule(secondAt)).status).toBe(201);
+    const due="2029-01-06T00:00:00.000Z";expect((await env.DB.prepare(`SELECT deletion_due_at FROM projects WHERE id=?`).bind(id).first<any>()).deletion_due_at).toBe(due);
+    const raced=await cancelProjectDeletion(env,principal,id,new Date("2029-01-05T23:59:59.999Z"),new Date(due));expect(raced.status).toBe(409);
+    expect((await env.DB.prepare(`SELECT deletion_due_at FROM projects WHERE id=?`).bind(id).first<any>()).deletion_due_at).toBe(due);
+  });
   it("schedules owner-confirmed deletion and finalizes an inert, content-free provenance shell",async()=>{
     const alice=await participant("alice"),bob=await participant("bob"),id=await project(alice);
     await invite(id,alice,bob);
