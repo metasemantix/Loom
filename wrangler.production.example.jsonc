@@ -6,13 +6,14 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "loom-local",
-      "database_id": "00000000-0000-0000-0000-000000000001",
+      "database_name": "loom-production",
+      "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
   ],
   "vars": {
-    "DISCORD_REDIRECT_URI": "http://localhost:8787/auth/discord/callback",
+    "DISCORD_CLIENT_ID": "replace-with-discord-application-id",
+    "DISCORD_REDIRECT_URI": "https://loom.replace-with-workers-subdomain.workers.dev/auth/discord/callback",
     "ACCOUNT_DELETION_GRACE_SECONDS": "259200"
   },
   "triggers": {
