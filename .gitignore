@@ -70,8 +70,7 @@ web_modules/
 .env.*
 !.env.example
 
-# One-time production values copied from the tracked, non-secret template.
-wrangler.production.jsonc
+# Wrangler's generated local state.
 .wrangler/
 
 # parcel-bundler cache (https://parceljs.org/)

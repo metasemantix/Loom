@@ -16,6 +16,11 @@
     "DISCORD_REDIRECT_URI": "https://loom.replace-with-workers-subdomain.workers.dev/auth/discord/callback",
     "ACCOUNT_DELETION_GRACE_SECONDS": "259200"
   },
+  "secrets": {
+    "required": [
+      "DISCORD_CLIENT_SECRET"
+    ]
+  },
   "triggers": {
     "crons": [
       "* * * * *"
