@@ -39,7 +39,7 @@ changes.
 6. Create/update the local D1 database by applying all migrations:
 
    ```sh
-   npm exec wrangler d1 migrations apply loom --local
+   npm run db:migrate:local
    ```
 
 7. Start the Worker with `npm run dev`, then open `http://localhost:8787/`. Dev
@@ -56,17 +56,66 @@ dependencies changed, and re-apply local migrations before starting Loom.
 Run `npm test` for authorization and ownership integration tests, and
 `npm run typecheck` for static checks.
 
-## Deployment
+## First production deployment
 
-Create a D1 database, replace `database_id` in `wrangler.jsonc`, set the
-`DISCORD_CLIENT_ID` and `DISCORD_REDIRECT_URI` variables for the deployed URL,
-and store `DISCORD_CLIENT_SECRET` with `wrangler secret put`. Apply migrations
-before deploying:
+Local development and production deliberately use different Wrangler files and
+D1 databases. `wrangler.jsonc` is the tracked localhost configuration and uses
+the disposable local `loom-local` database. Production commands use the tracked
+`wrangler.production.jsonc`, which records Loom's non-secret production topology
+for every clone and Codespace. There is no need to switch files or values for
+normal development, and `DEV_AUTH_BYPASS` is absent from production configuration.
 
-```sh
-npm exec wrangler d1 migrations apply loom --remote
-npm run deploy
-```
+The following is the one-time production runbook. It can be run from Codespaces
+or another normal terminal:
+
+1. Authenticate Wrangler to the intended Cloudflare account with `npm exec
+   wrangler login`, then confirm it with `npm exec wrangler whoami`. Interactive
+   login is sufficient; a Codespaces secret is not required. In a non-interactive
+   console, use Cloudflare's supported `CLOUDFLARE_API_TOKEN` environment variable
+   instead, without writing the token to this repository.
+2. Create a new, empty production database with `npm exec wrangler d1 create
+   loom-production`. Replace the obvious all-zero `database_id` placeholder in
+   tracked `wrangler.production.jsonc` with the ID returned by that command. Do
+   not reuse or copy the disposable local database.
+3. In the Discord Developer Portal, create/select the production application and
+   register the exact callback
+   `https://loom.<workers-subdomain>.workers.dev/auth/discord/callback` (or the
+   equivalent URL on the deployed route). Put that same URL in
+   `DISCORD_REDIRECT_URI` in `wrangler.production.jsonc`, and put the Discord
+   application ID in `DISCORD_CLIENT_ID` there. These two values and the D1 ID are
+   safe configuration, not secrets. Replace every placeholder, review the diff,
+   and commit these one-time production topology values so future Codespaces are
+   ready without reconstruction.
+4. Apply the repository's complete migration history to the fresh remote database
+   with `npm run db:migrate:production` **before creating or deploying any Worker
+   version**. This command changes D1 only and does not expose the Worker.
+5. Bootstrap the Worker without putting an unusable version into production
+   traffic: run `npm run deploy:bootstrap`. This uses the deliberately minimal
+   tracked `wrangler.production-bootstrap.jsonc`, which has the same Worker name
+   but no bindings and no required-secret declaration, to create the Worker
+   resource and an undeployed version. The bootstrap config exists only because
+   a brand-new Worker cannot satisfy the canonical config's required-secret check
+   until it has a version to which Wrangler can add the first secret. Never deploy
+   the bootstrap version. Then run `npm exec -- wrangler versions secret put
+   DISCORD_CLIENT_SECRET --config wrangler.production.jsonc` and paste the secret
+   only at Wrangler's prompt. The `versions secret` command creates another
+   undeployed version; unlike ordinary `wrangler secret put`, it does not deploy
+   that version. Finally run `npm run deploy` to create the first usable deployed
+   version with the already-migrated D1 binding and stored secret. The client
+   secret, Cloudflare API tokens, and other credentials must never be placed in a
+   Wrangler file or any tracked file.
+6. Open the deployed `/` page, choose Discord sign-in, and verify Discord returns
+   to the registered callback. Confirm that `/me` loads, create a small private
+   document, reload the page, and verify the document still opens. This checks
+   the deployed Worker, OAuth callback, remote D1 binding, migrations, mutation,
+   and subsequent read together.
+
+For later releases, run `npm run db:migrate:production` before `npm run deploy`.
+Use `npm run deploy:check` for an offline bundle/configuration check; it does not
+access Cloudflare or validate account-owned values. Production configuration
+declares `DISCORD_CLIENT_SECRET` as required so Wrangler warns when it is absent
+in local validation, but Cloudflare remains the authoritative secret store. The
+fixed account deletion grace is 259200 seconds (three days).
 
 Participant context has stable projections at
 `/participants/{participant_id}/context.md` and
