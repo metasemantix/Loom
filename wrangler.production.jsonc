@@ -7,7 +7,7 @@
     {
       "binding": "DB",
       "database_name": "loom-production",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "7053954f-8ff6-411b-8a42-d03b33e81bf0",
       "migrations_dir": "migrations"
     }
   ],
