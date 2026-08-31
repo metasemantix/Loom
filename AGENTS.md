@@ -16,6 +16,16 @@ This file contains operating rules for coding agents working on Loom.
 - Extend existing concepts where possible. Do not invent parallel abstractions because they are locally convenient.
 - Keep scope bounded to the requested change. If a nearby architectural question is unresolved, report it rather than silently deciding it.
 
+## Incidental impressions: notice, record, do not derail
+
+`IMPRESSIONS.md` is an optional, non-authoritative scratchpad for codebase weirdness encountered while doing a bounded task.
+
+- If you notice a plausible maintenance smell, awkward abstraction, brittle helper, surprising coupling, unclear naming, or other pre-existing oddity that is worth preserving but not required by the current task, add a short concrete entry to `IMPRESSIONS.md` and continue the assigned work.
+- Do not manufacture observations merely to update the file. It is not a required deliverable for every run.
+- Do not fix something solely because you recorded it there. An impression becomes implementation work only when an explicit task/decision promotes it, or when leaving it unfixed would make the current change incorrect or unsafe.
+- `IMPRESSIONS.md` cannot override `DECISIONS.md`, normative architecture documents, `CODEX_TASK.md`, or executable acceptance requirements.
+- Never record secrets, credentials, private user data, or document bodies there.
+
 ## Preserve user-visible behavior during refactors
 
 Preserve existing user-visible capabilities and established semantics unless their removal or replacement is explicitly required by the task or documented project decisions. Moving or simplifying a UI capability is fine; silently dropping it is not. Before completing a refactor, compare the affected pre-change and post-change surfaces for lost actions, information, authorization behavior, and provenance/history detail.
