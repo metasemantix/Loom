@@ -87,23 +87,22 @@ or another normal terminal:
    and commit these one-time production topology values so future Codespaces are
    ready without reconstruction.
 4. Apply the repository's complete migration history to the fresh remote database
-   with `npm run db:migrate:production` **before creating or deploying any Worker
-   version**. This command changes D1 only and does not expose the Worker.
-5. Bootstrap the Worker without putting an unusable version into production
-   traffic: run `npm run deploy:bootstrap`. This uses the deliberately minimal
-   tracked `wrangler.production-bootstrap.jsonc`, which has the same Worker name
-   but no bindings and no required-secret declaration, to create the Worker
-   resource and an undeployed version. The bootstrap config exists only because
-   a brand-new Worker cannot satisfy the canonical config's required-secret check
-   until it has a version to which Wrangler can add the first secret. Never deploy
-   the bootstrap version. Then run `npm exec -- wrangler versions secret put
+   with `npm run db:migrate:production` before deploying the usable Loom Worker.
+   This command changes D1 only and does not expose the Worker.
+5. Bootstrap the Worker with `npm run deploy:bootstrap`. Wrangler cannot upload an
+   undeployed version for a Worker that does not exist yet, so this first command
+   deliberately performs one deployment using `wrangler.production-bootstrap.jsonc`.
+   The bootstrap config points at `src/bootstrap.ts`, has no D1 or Discord bindings,
+   and serves only a non-cacheable `503 Loom bootstrap` response. It exists solely
+   to create the Worker resource safely; it is not the Loom application. Once the
+   Worker exists, run `npm exec -- wrangler versions secret put
    DISCORD_CLIENT_SECRET --config wrangler.production.jsonc` and paste the secret
-   only at Wrangler's prompt. The `versions secret` command creates another
-   undeployed version; unlike ordinary `wrangler secret put`, it does not deploy
-   that version. Finally run `npm run deploy` to create the first usable deployed
-   version with the already-migrated D1 binding and stored secret. The client
-   secret, Cloudflare API tokens, and other credentials must never be placed in a
-   Wrangler file or any tracked file.
+   only at Wrangler's prompt. The `versions secret` command creates an undeployed
+   version rather than replacing the inert bootstrap deployment. Finally run
+   `npm run deploy` to replace the bootstrap with the first usable Loom deployment,
+   using the migrated D1 binding and stored secret. The client secret, Cloudflare
+   API tokens, and other credentials must never be placed in a Wrangler file or
+   any tracked file.
 6. Open the deployed `/` page, choose Discord sign-in, and verify Discord returns
    to the registered callback. Confirm that `/me` loads, create a small private
    document, reload the page, and verify the document still opens. This checks
