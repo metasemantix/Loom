@@ -12,6 +12,7 @@ import { createProjectDocument, deleteProjectDocument, listCreatorEntitlements, 
 import { exportProject } from "./export";
 import { cancelProjectDeletion, scheduleProjectDeletion } from "./project-deletion";
 import { devAuthEnabled, establishDevSession, markDevAuth } from "./dev-auth";
+import { createCredential, listCredentials, machineRead, revokeCredential } from "./agent-access";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -79,6 +80,11 @@ async function discordCallback(request: Request, env: Env): Promise<Response> {
 
 async function handleRequest(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url), path = url.pathname;
+    if (path === "/api/agent/me") return machineRead(request,env,"introspect");
+    if (path === "/api/agent/project") return machineRead(request,env,"project");
+    if (path === "/api/agent/documents") return machineRead(request,env,"documents");
+    const agentDocumentMatch=path.match(/^\/api\/agent\/documents\/(doc_[a-z0-9]+)$/);
+    if(agentDocumentMatch)return machineRead(request,env,"document",agentDocumentMatch[1]);
     if (request.method === "GET" && path === "/") return Response.redirect(`${url.origin}/me`, 302);
     if (request.method === "GET" && path === "/login") return loginPage();
     if (request.method === "GET" && path === "/auth/discord") return discordStart(request, env);
@@ -142,6 +148,11 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     const projectMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)$/);
     if (projectMatch && request.method === "GET") return getProject(env, principal, projectMatch[1]);
     if (projectMatch && request.method === "PUT") return updateProject(request, env, principal, projectMatch[1]);
+    const credentialsMatch=path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/agent-credentials$/);
+    if(credentialsMatch&&request.method==="GET")return listCredentials(env,principal,credentialsMatch[1]);
+    if(credentialsMatch&&request.method==="POST")return createCredential(request,env,principal,credentialsMatch[1]);
+    const credentialMatch=path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/agent-credentials\/(mac_[a-z0-9]+)$/);
+    if(credentialMatch&&request.method==="DELETE")return revokeCredential(env,principal,credentialMatch[1],credentialMatch[2]);
     const memberMatch = path.match(/^\/api\/projects\/(prj_[a-z0-9]+)\/members\/(par_[a-z0-9]+)$/);
     if (memberMatch && request.method === "DELETE") return removeMember(request, env, principal, memberMatch[1], memberMatch[2]);
     if (memberMatch && request.method === "PUT") return changeRole(request, env, principal, memberMatch[1], memberMatch[2]);

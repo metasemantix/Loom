@@ -12,10 +12,11 @@ interface DocumentRow {
   original_filename: string | null; original_content_type: string | null;
   created_at: string; version_id: string; version_number: number; content: string;
   content_type: string; updated_at: string;
+  compression: string | null;
 }
 
 const currentDocuments = `
- SELECT d.id,d.kind,d.title,d.logical_path,d.visibility,d.original_filename,d.original_content_type,d.created_at,
+ SELECT d.id,d.kind,d.title,d.logical_path,d.visibility,d.compression,d.original_filename,d.original_content_type,d.created_at,
  v.id version_id,v.version_number,v.content,v.content_type,v.created_at updated_at
  FROM documents d JOIN document_versions v ON v.id=d.current_version_id
  WHERE d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL`;
@@ -49,7 +50,7 @@ export async function readDocument(env: Env, principal: Principal, id: string, p
   const owned = await env.DB.prepare(`${currentDocuments} AND d.id=?`).bind(principal.participantId, id).first<DocumentRow>();
   if (owned) return json({ document: owned, canEdit: true, context: "owner" });
   if (!projectId) return problem(404, "not_found", "Document not found");
-  const shared = await env.DB.prepare(`SELECT d.id,d.kind,d.title,d.logical_path,d.visibility,d.original_filename,d.original_content_type,d.created_at,
+  const shared = await env.DB.prepare(`SELECT d.id,d.kind,d.title,d.logical_path,d.visibility,d.compression,d.original_filename,d.original_content_type,d.created_at,
     v.id version_id,v.version_number,v.content,v.content_type,v.created_at updated_at,u.display_name owner_display_name
     FROM project_documents pd JOIN projects project ON project.id=pd.project_id
     JOIN project_members pm ON pm.project_id=project.id AND pm.participant_id=?
@@ -100,8 +101,8 @@ export async function uploadDocument(request: Request, env: Env, principal: Prin
   return insertDocument(env, principal, { title, kind: "document", visibility: String(form.get("visibility") || "private"), content, contentType, logicalPath: path, originalFilename: file.name, originalContentType: file.type || contentType });
 }
 
-async function ownedDocument(env: Env, principal: Principal, id: string): Promise<{ id: string; version_number: number; title: string; logical_path: string; visibility: string } | null> {
-  return env.DB.prepare(`SELECT d.id,d.title,d.logical_path,d.visibility,v.version_number FROM documents d JOIN document_versions v ON v.id=d.current_version_id WHERE d.id=? AND d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL`)
+async function ownedDocument(env: Env, principal: Principal, id: string): Promise<{ id: string; version_number: number; title: string; logical_path: string; visibility: string; compression:string|null } | null> {
+  return env.DB.prepare(`SELECT d.id,d.title,d.logical_path,d.visibility,d.compression,v.version_number FROM documents d JOIN document_versions v ON v.id=d.current_version_id WHERE d.id=? AND d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL`)
     .bind(id, principal.participantId).first();
 }
 
@@ -121,19 +122,22 @@ export async function updateDocument(request: Request, env: Env, principal: Prin
 export async function updateMetadata(request: Request, env: Env, principal: Principal, id: string): Promise<Response> {
   const document = await ownedDocument(env, principal, id); if (!document) return problem(404, "not_found", "Document not found");
   let body; try { body = await readJson(request); } catch (error) { return problem(400, "invalid_request", (error as Error).message); }
-  const next = { title: body.title ?? document.title, logical_path: body.logicalPath ?? document.logical_path, visibility: body.visibility ?? document.visibility };
+  const compression=body.compression===undefined?document.compression:body.compression===null||body.compression===""?null:body.compression;
+  const next = { title: body.title ?? document.title, logical_path: body.logicalPath ?? document.logical_path, visibility: body.visibility ?? document.visibility,compression };
   if (typeof next.title !== "string" || !next.title.trim() || next.title.length > 120) return problem(400, "invalid_request", "title must be between 1 and 120 characters");
   if (!validPath(next.logical_path)) return problem(400, "invalid_request", "logicalPath must be a valid relative path");
   if (typeof next.visibility !== "string" || !VISIBILITIES.has(next.visibility)) return problem(400, "invalid_request", "unsupported visibility");
-  const changes: Record<string, { previous: string; new: string }> = {};
+  if(next.compression!==null&&(typeof next.compression!=="string"||next.compression.length>2000))return problem(400,"invalid_request","compression must be null or no more than 2,000 characters");
+  const changes: Record<string, { previous: string|null; new: string|null }> = {};
   if (next.title.trim() !== document.title) changes.title = { previous: document.title, new: next.title.trim() };
   if (next.logical_path !== document.logical_path) changes.logicalPath = { previous: document.logical_path, new: next.logical_path };
   if (next.visibility !== document.visibility) changes.visibility = { previous: document.visibility, new: next.visibility };
+  if(next.compression!==document.compression)changes.compression={previous:document.compression,new:next.compression};
   if (!Object.keys(changes).length) return json({ document: { id, ...next }, changed: false });
   const now = new Date().toISOString();
   try {
     await env.DB.batch([
-      env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=? WHERE id=? AND owner_id=?`).bind(next.title.trim(), next.logical_path, next.visibility, id, principal.participantId),
+      env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=?,compression=? WHERE id=? AND owner_id=?`).bind(next.title.trim(), next.logical_path, next.visibility,next.compression, id, principal.participantId),
       env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) VALUES(?,?,'metadata_changed','human',?,?,?)`).bind(opaque("evt"), id, principal.userId, JSON.stringify(changes), now),
     ]);
   } catch { return problem(409, "path_conflict", "That logical path is already in use"); }
