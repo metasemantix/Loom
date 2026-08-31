@@ -13,7 +13,7 @@
   ],
   "vars": {
     "DISCORD_CLIENT_ID": "replace-with-discord-application-id",
-    "DISCORD_REDIRECT_URI": "https://loom.replace-with-workers-subdomain.workers.dev/auth/discord/callback",
+    "DISCORD_REDIRECT_URI": "https://loom.metasemantix.workers.dev/auth/discord/callback",
     "ACCOUNT_DELETION_GRACE_SECONDS": "259200"
   },
   "secrets": {
