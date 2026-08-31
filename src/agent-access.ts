@@ -35,7 +35,8 @@ async function authenticate(request:Request,env:Env,operation:string,target:stri
   if(!match||!TOKEN_PATTERN.test(match[1])){await audit(env,null,null,operation,target,false,"invalid_bearer_token");return {credential:null,response:problem(401,"invalid_bearer_token","A valid bearer credential is required")}}
   const hash=await hashSecret(match[1]);const credential=await env.DB.prepare(`SELECT c.id,c.project_id,c.authorized_by_participant_id,c.label,c.fingerprint,c.created_at,c.revoked_at,x.name,x.description,x.read_audience,x.lifecycle_state,x.deletion_due_at FROM project_machine_credentials c JOIN projects x ON x.id=c.project_id WHERE c.token_hash=?`).bind(hash).first<Credential>();
   if(!credential||credential.revoked_at){await audit(env,credential?.id??null,credential?.project_id??null,operation,target,false,credential?.revoked_at?"credential_revoked":"invalid_bearer_token");return {credential:null,response:problem(401,"invalid_bearer_token","A valid bearer credential is required")}}
-  if(credential.lifecycle_state==="shell"){await audit(env,credential.id,credential.project_id,operation,target,false,"project_unavailable");return {credential:null,response:problem(410,"project_unavailable","The project no longer provides a readable corpus")}}
+  const now=new Date().toISOString();
+  if(credential.lifecycle_state==="shell"||(credential.deletion_due_at!==null&&credential.deletion_due_at<=now)){await audit(env,credential.id,credential.project_id,operation,target,false,"project_unavailable");return {credential:null,response:problem(410,"project_unavailable","The project no longer provides a readable corpus")}}
   return {credential,response:null};
 }
 
