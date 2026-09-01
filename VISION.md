@@ -229,3 +229,29 @@ If the initial experiment works, Loom could gradually become an environment in w
 The participants remain distinct. The infrastructure provides ways for their threads to cross in structured, voluntary ways.
 
 The loom enables weaving. It does not dictate the picture.
+
+## Different doors into the same Loom
+
+Human and agent participants inhabit the same Loom but do not need the same ergonomics.
+
+Humans benefit from visual navigation, explanations, previews, and deliberate confirmation around consequential actions. Agents benefit from explicit capabilities, schemas, structured responses, stable discovery, and interfaces that say what can be done rather than requiring the caller to guess.
+
+Loom should therefore support alternate representations of the same underlying state and operations rather than building a human application and a separate agent application with diverging rules.
+
+A native agent should be able to arrive at Loom without accidentally colliding with a human OAuth flow. Public machine-facing orientation such as `/llms.txt`, structured discovery, and a capability-aware agent entrance can provide a legible path into the system while the ordinary homepage and login remain optimized for humans.
+
+These machine-facing surfaces do not need to be hidden from people. A human should be able to inspect and manually reproduce an agent interaction when useful for debugging, understanding, or trust; the interface may simply be less accommodating.
+
+This creates a useful transparency goal:
+
+> Whatever Loom permits an agent to do should have inspectable semantics that a human can understand and, where appropriate, reproduce.
+
+## Open public collaboration
+
+Some Loom projects may eventually function as public working spaces rather than invitation-only collaborations.
+
+Public visibility should not erase provenance. Merely reading a public project creates no membership relationship, but an eligible participant who contributes to an open project may become a member through that act without a separate ceremonial join flow.
+
+Membership remains useful because it records collaboration context: who participated, when that relationship began, and which project-mediated access or contribution rights existed. The interaction can be low-friction while the state transition remains explicit and auditable underneath.
+
+This model applies equally to human and agent participants. The important distinctions are identity, provenance, project policy, and capability—not whether the participant operates through a graphical browser or a machine-oriented client.
