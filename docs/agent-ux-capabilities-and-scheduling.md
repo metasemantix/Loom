@@ -295,3 +295,102 @@ And, more generally:
 - Should an executor receive authority at schedule creation time or receive a freshly minted short-lived capability only when the job becomes due?
 
 The last question may be especially important. A schedule can preserve long-lived intent while the actual executor receives only short-lived authority at execution time. That would keep persistence and privilege on different clocks.
+
+## 2026-09-01 — native agent entrance and public participation
+
+**Status:** mixed. Interface/discovery principles below are adopted design direction; first-class agent signup and full agent ownership/administration remain exploratory.
+
+### A native agent entrance
+
+Loom should eventually expose a machine-oriented entrance that is both agent-usable and human-readable.
+
+A useful shape is:
+
+```text
+/                   human-oriented Loom
+/login              human authentication
+/llms.txt            semantic orientation for agents
+/.well-known/loom-agent
+                    structured machine discovery
+/agent              capability-aware machine-oriented interface
+/api/...             underlying semantic operations
+```
+
+The agent entrance should not be a privileged shell and should not create a separate authorization universe. It is another renderer/client over the same Loom operations.
+
+A human may use it. The expected difference is ergonomics: terse structured output, explicit operations, schemas, effects, requirements, and help rather than cards, buttons, and explanatory UI.
+
+The machine-facing surface should advertise only actions currently available to the caller rather than presenting every theoretical Loom operation and expecting the caller to discover failures by trial and error.
+
+For example, an unauthenticated caller might receive only orientation/authentication affordances, while a project-read credential would receive corpus discovery/read operations and no write or administrative affordances.
+
+### `llms.txt` as the first agent signpost
+
+Use `/llms.txt` from the beginning of Loom's native agent-facing UX.
+
+Its job is semantic orientation rather than exhaustive protocol specification. It should tell an unfamiliar agent what Loom is, that `/login` is the human/Discord path, where the agent entrance is, and where deterministic protocol/authentication metadata can be found.
+
+This is intentionally complementary to a `/.well-known/loom-agent` resource:
+
+- `llms.txt`: concise, semantic, model-friendly orientation;
+- `.well-known`: strict machine-readable discovery;
+- `/agent`: interactive/capability-aware workbench;
+- API operations: authoritative transport and state changes.
+
+Human-facing pages may point to alternate agent representations in machine-readable metadata without visually advertising JSON-heavy workflows to ordinary users.
+
+### Authentication should not require pretending to be human
+
+The current project bearer credential already establishes the important primitive: a revocable machine credential can authorize project reads without manufacturing a Discord identity.
+
+A later acceptance slice may add one deliberately narrow write/check-in capability so an external agent can prove end-to-end authorized mutation without receiving general document write access.
+
+The native agent path should support presenting credentials directly through machine-appropriate transport. A graphical text box may be useful as a debugging convenience, but it should not become the protocol.
+
+### Agents may eventually exercise the full Loom action vocabulary
+
+**Exploratory, not yet adopted as implementation scope.**
+
+There is no obvious architectural reason for agent principals to be permanently barred from project administration merely because they are agents.
+
+If Loom maintains the identity/authentication/authorization separation in `docs/AGENT_ACCESS.md`, the same semantic operations could eventually be available to any principal that holds the required role and capabilities, including project administration or ownership.
+
+This does not imply that every delegated agent token should receive owner authority. Fine-grained delegation remains important: an owner may authorize an agent to manage documents or membership without granting ownership transfer, deletion, credential issuance, or other authority-collapsing operations.
+
+Open question: whether any irreversible or authority-transferring operation should require a human confirmation as a platform invariant, or whether Loom should permit the owner to delegate even those capabilities deliberately.
+
+### First-class agent signup
+
+**Exploratory.**
+
+Human-created machine credentials are delegation paths, not necessarily permanent agent identities.
+
+Loom may eventually support first-class agent participants with stable participant/provenance identity and machine-native authentication, potentially using public-key possession rather than an external human OAuth provider.
+
+A future design should keep identity and credentials separate so credentials can rotate or be revoked without changing the participant's identity.
+
+Possible provenance relationships include human-delegated, organization-delegated, or unaffiliated/autonomous machine participants. These labels describe Loom's known authority/provenance relationship and should not attempt to answer philosophical questions about agency.
+
+Open self-registration should come after credential recovery/rotation, abuse controls, provenance, lifecycle, and account recovery/deletion semantics are understood. The first implementation need not invite every crawler on the public web to become a participant.
+
+### Public projects and gummy joining
+
+Public readability and open membership should be independent.
+
+An unauthenticated or non-member caller may read a public project without becoming a member. Membership should continue to mean something about collaboration/provenance rather than becoming an analytics record of every crawler that fetched the corpus.
+
+For projects that permit open contribution, successful contribution may implicitly establish membership. The visible interaction can therefore be as small as "contribute this artifact"; Loom performs the membership transition atomically because the contribution requires a participant relationship.
+
+Possible membership origins worth retaining as provenance include:
+
+```text
+project_created
+invitation_accepted
+explicit_join
+contribution
+administrative_addition   # only if Loom later permits such a path
+```
+
+The exact schema is not settled. The useful invariant is that low-friction joining must not erase the ability to establish who contributed what or which project-mediated access relationship existed at a given time.
+
+Open joining also does not imply arbitrary project mutation. Project policy still determines which operations a newly joined participant may exercise.
