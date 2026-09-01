@@ -617,3 +617,27 @@ Loom semantics
 ```
 
 This is exploratory, but it provides a possible bridge between current human-facing implementation work and later native agent participation.
+
+## 2026-09-01 — agent-native entrance, open projects, and provenance-preserving join
+
+Brainstorming around the first deployed machine credential exposed a UX gap: Loom can already issue a revocable project-read token, but an external agent still needs a native place to discover how to present it and what actions are available.
+
+Ideas preserved from the discussion:
+
+- start native agent discovery with `/llms.txt`;
+- complement semantic orientation with a stricter `/.well-known/loom-agent` discovery resource;
+- provide a human-readable but machine-oriented `/agent` entrance;
+- treat that entrance as another client/renderer of ordinary Loom semantics, not a privileged shell;
+- advertise only actions currently available to the authenticated caller, with explicit help/tooltips/schemas;
+- keep human OAuth and agent authentication as different ergonomic paths into the same authorization model;
+- let human pages advertise agent alternates non-visually so agents do not accidentally collide with Discord login;
+- do not hide machine surfaces for security; authorization remains the boundary;
+- consider a deliberately narrow write/check-in capability as an end-to-end acceptance test before general agent writes;
+- eventually allow agent principals to exercise broader capabilities, potentially including project administration or ownership, but keep this exploratory until delegation and irreversible-action semantics are settled;
+- distinguish delegated machine credentials from first-class agent identity; future agent signup may require a stable participant identity plus machine-native credential proof;
+- separate public readability from open membership;
+- do not create membership merely because a public project was read;
+- permit "gummy" joining for open projects where successful contribution atomically establishes membership;
+- preserve membership provenance so Loom can still establish who contributed what and which project-mediated access relationship existed.
+
+The useful pattern underneath these ideas is simple: **different interfaces, same Loom semantics; low-friction participation without low-fidelity provenance.**
