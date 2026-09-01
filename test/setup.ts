@@ -8,6 +8,7 @@ import minimalTombstones from "../migrations/0006_minimal_participant_tombstones
 import projectNativeDocuments from "../migrations/0007_project_native_documents.sql?raw";
 import projectDeletion from "../migrations/0008_scheduled_project_deletion.sql?raw";
 import agentReadAccess from "../migrations/0009_agent_read_access.sql?raw";
+import agentCheckins from "../migrations/0010_agent_checkins.sql?raw";
 
 function statements(sql:string){const result:string[]=[],lines:string[]=[],flush=()=>{const value=lines.join("\n").trim().replace(/;$/,"");lines.length=0;if(value)result.push(value)};let trigger=false;for(const line of sql.split("\n")){if(/^CREATE TRIGGER\b/.test(line.trim()))trigger=true;lines.push(line);if(trigger?/^END;$/.test(line.trim()):line.trim().endsWith(";")){flush();trigger=false}}flush();return result}
 async function apply(sql:string){for(const statement of statements(sql))await env.DB.prepare(statement).run()}
@@ -39,5 +40,8 @@ const after=await snapshot();
 await apply(projectDeletion);
 const afterProjectDeletionMigration=await snapshot();
 await apply(agentReadAccess);
+await env.DB.prepare(`INSERT INTO project_machine_credentials(id,project_id,authorized_by_participant_id,label,token_hash,fingerprint,created_at) VALUES('mac_migration','prj_migration','par_migration','Existing reader','migration-hash','migration-fp',?)`).bind(at).run();
+await apply(agentCheckins);
+const migratedCredential=await env.DB.prepare(`SELECT id,checkin_enabled FROM project_machine_credentials WHERE id='mac_migration'`).first();
 const foreignKeyErrors=(await env.DB.prepare(`PRAGMA foreign_key_check`).all()).results;
-(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,foreignKeyErrors};
+(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,foreignKeyErrors};

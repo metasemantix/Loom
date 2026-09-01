@@ -43,7 +43,7 @@ async function zipFiles(response: Response): Promise<Map<string, string>> {
 }
 
 beforeEach(async () => {
-  await env.DB.exec("DELETE FROM machine_read_audit; DELETE FROM project_machine_credentials; DELETE FROM account_events; DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
+  await env.DB.exec("DELETE FROM machine_read_audit; DELETE FROM project_machine_checkins; DELETE FROM project_machine_credentials; DELETE FROM account_events; DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
 });
 
 describe("local development authentication", () => {
@@ -96,8 +96,8 @@ describe("local development authentication", () => {
   });
 });
 
-describe("migration 0007 upgrade safety",()=>{
-  it("preserves existing participant documents, revisions, metadata events, and contributions",()=>{const result=(globalThis as typeof globalThis & {__loomMigrationRegression:{before:unknown;after:unknown;afterProjectDeletionMigration:unknown;foreignKeyErrors:unknown[]}}).__loomMigrationRegression;expect(result.after).toEqual(result.before);expect(result.afterProjectDeletionMigration).toEqual(result.before);expect(result.foreignKeyErrors).toEqual([])})
+describe("migration upgrade safety",()=>{
+  it("preserves existing corpus state and makes existing machine credentials read-only",()=>{const result=(globalThis as typeof globalThis & {__loomMigrationRegression:{before:unknown;after:unknown;afterProjectDeletionMigration:unknown;migratedCredential:unknown;foreignKeyErrors:unknown[]}}).__loomMigrationRegression;expect(result.after).toEqual(result.before);expect(result.afterProjectDeletionMigration).toEqual(result.before);expect(result.migratedCredential).toEqual({id:"mac_migration",checkin_enabled:0});expect(result.foreignKeyErrors).toEqual([])})
 });
 
 async function invite(projectId:string, inviter:{cookie:string}, recipient:{cookie:string}) {
@@ -688,6 +688,23 @@ describe("project-native documents",()=>{
 });
 
 describe("read-only machine access",()=>{
+  it("publishes non-secret discovery and a parseable unauthenticated workbench",async()=>{
+    const orientation=await SELF.fetch(`${origin}/llms.txt`);expect(orientation.status).toBe(200);expect(orientation.headers.get("content-type")).toContain("text/plain");const text=await orientation.text();expect(text.length).toBeLessThan(500);expect(text).toContain("/agent");expect(text).toContain("/.well-known/loom-agent");expect(text).toContain("/login");
+    const discovery=await SELF.fetch(`${origin}/.well-known/loom-agent`).then(r=>r.json<any>());expect(discovery).toMatchObject({service:"Loom",protocolVersion:"1",entrance:"/agent",authentication:{scheme:"Bearer"},orientation:"/llms.txt"});expect(JSON.stringify(discovery)).not.toMatch(/projectId|credential|token_hash/);
+    expect((await SELF.fetch(`${origin}/login`)).status).toBe(200);const page=await SELF.fetch(`${origin}/agent`),html=await page.text();expect(page.status).toBe(200);expect(html).toContain("ordinary Loom sign-in");expect(html).toContain('type="password"');expect(html).not.toContain("localStorage");const script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1]??"";expect(()=>new Function(script)).not.toThrow();
+  });
+
+  it("keeps reads default-only and commits explicitly authorized check-ins with machine provenance",async()=>{
+    const owner=await participant("checkin_owner"),other=await participant("checkin_other");const made=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Check-ins",readAudience:"agents_only"})}).then(r=>r.json<any>()),projectId=made.project.id;
+    const createCredential=async(checkinEnabled:boolean,cookie=owner.cookie)=>SELF.fetch(`${origin}/api/projects/${projectId}/agent-credentials`,{method:"POST",headers:{cookie,origin,"content-type":"application/json"},body:JSON.stringify({label:checkinEnabled?"Reporter":"Reader",checkinEnabled})});
+    expect((await createCredential(true,other.cookie)).status).toBe(403);const readonly=await createCredential(false).then(r=>r.json<any>()),enabled=await createCredential(true).then(r=>r.json<any>()),readHeaders={authorization:`Bearer ${readonly.token}`},writeHeaders={authorization:`Bearer ${enabled.token}`};
+    expect((await SELF.fetch(`${origin}/api/agent/me`,{headers:readHeaders}).then(r=>r.json<any>())).caller.grant.capabilities).not.toContain("agent_checkin:write");expect((await SELF.fetch(`${origin}/api/agent/check-in`,{method:"POST",headers:{...readHeaders,"content-type":"application/json"},body:JSON.stringify({value:"no"})})).status).toBe(403);
+    expect((await SELF.fetch(`${origin}/api/agent/me`,{headers:writeHeaders}).then(r=>r.json<any>())).caller.grant.capabilities).toContain("agent_checkin:write");const checked=await SELF.fetch(`${origin}/api/agent/check-in`,{method:"POST",headers:{...writeHeaders,"content-type":"application/json"},body:JSON.stringify({value:"ready"})});expect(checked.status).toBe(201);const checkin=(await checked.json<any>()).checkin;expect(checkin).toMatchObject({projectId,credentialId:enabled.credential.id,value:"ready"});expect(await env.DB.prepare(`SELECT credential_id,project_id,value,created_at FROM project_machine_checkins WHERE id=?`).bind(checkin.id).first()).toMatchObject({credential_id:enabled.credential.id,project_id:projectId,value:"ready"});
+    const listing=await SELF.fetch(`${origin}/api/projects/${projectId}/agent-credentials`,{headers:{cookie:owner.cookie}}).then(r=>r.json<any>());expect(listing.credentials.find((x:any)=>x.id===enabled.credential.id).capabilities).toContain("agent_checkin:write");expect(JSON.stringify(listing)).not.toContain(enabled.token);expect(JSON.stringify(listing)).not.toContain("token_hash");
+    for(const body of [{},{value:""},{value:"x".repeat(501)}])expect((await SELF.fetch(`${origin}/api/agent/check-in`,{method:"POST",headers:{...writeHeaders,"content-type":"application/json"},body:JSON.stringify(body)})).status).toBe(400);
+    await SELF.fetch(`${origin}/api/projects/${projectId}/archive`,{method:"POST",headers:{cookie:owner.cookie,origin}});const introspection=await SELF.fetch(`${origin}/api/agent/me`,{headers:writeHeaders}).then(r=>r.json<any>());expect(introspection.caller.grant.capabilities).not.toContain("agent_checkin:write");expect((await SELF.fetch(`${origin}/api/agent/check-in`,{method:"POST",headers:{...writeHeaders,"content-type":"application/json"},body:JSON.stringify({value:"stale"})})).status).toBe(403);expect((await SELF.fetch(`${origin}/api/agent/project`,{headers:writeHeaders})).status).toBe(200);
+    await SELF.fetch(`${origin}/api/projects/${projectId}/unarchive`,{method:"POST",headers:{cookie:owner.cookie,origin}});await SELF.fetch(`${origin}/api/projects/${projectId}/agent-credentials/${enabled.credential.id}`,{method:"DELETE",headers:{cookie:owner.cookie,origin}});expect((await SELF.fetch(`${origin}/api/agent/check-in`,{method:"POST",headers:{...writeHeaders,"content-type":"application/json"},body:JSON.stringify({value:"revoked"})})).status).toBe(401);
+  });
   it("creates a one-time secret, reads the live scoped corpus, audits, and revokes immediately",async()=>{
     const owner=await participant("agent_owner"),other=await participant("agent_other");
     const projectResponse=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Agent corpus",readAudience:"agents_only"})});
