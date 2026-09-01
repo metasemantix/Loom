@@ -14,5 +14,7 @@ export const operationBranches = {
   "document.read": ["owner-private.allowed","other-private.denied","anonymous-public.allowed"],
   "machine-credential.manage": ["owner.create.allowed","non-owner.create.denied","owner.revoke.allowed","revoked.next-request.denied","shell-finalization.revokes"],
   "machine-corpus.read": ["valid.introspect.allowed","participant-contribution.allowed","project-native.allowed","outside-project.denied","retracted.next-request.denied","archived.allowed","deletion-scheduled.allowed","shell.denied","malformed.denied","unknown.denied","mutation.denied-and-attributed"],
+  "agent.discovery": ["llms.public","well-known.public-non-secret","entrance.public-parseable","human-login.unchanged"],
+  "agent-checkin.write": ["read-only.denied","enabled.active.allowed","provenance.owner-inspectable","malformed.denied","oversized.denied","revoked.denied","archived.denied","deletion-scheduled.denied","shell.denied","stale-lifecycle.denied"],
 } as const;
 export const caseName=(operation:keyof typeof operationBranches,branch:string)=>`${operation} :: ${branch}`;

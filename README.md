@@ -4,8 +4,9 @@ Loom is a deliberately small Cloudflare Worker and D1 application for
 participant-owned text documents. It includes Discord sign-in, Loom-native
 participant profiles, browser sessions, uploads, document and metadata history,
 stable authorized Markdown/JSON projections, projects that reference (but do
-not copy) participant-owned documents, and revocable read-only project
-credentials for generic agents. It does **not** include agent writes, direct
+not copy) participant-owned documents, and revocable project credentials for
+generic agents, read-only by default with an explicit narrow check-in capability.
+It does **not** include agent document writes, direct
 messaging, semantic search, or backend AI.
 
 See [`CHANGELOG.md`](./CHANGELOG.md) for notable application and interface
@@ -161,10 +162,17 @@ administrators can leave; administrators can remove ordinary members, while
 only owners can remove administrators. Departure removes only the departing
 participant's project links and never their source documents.
 
-Project owners manage read-only credentials at
+Public machine orientation is available at `/llms.txt`, strict protocol discovery
+at `/.well-known/loom-agent`, and a session-only bearer-token workbench at `/agent`.
+
+Project owners manage machine credentials at
 `/api/projects/{project_id}/agent-credentials`. The raw opaque token is returned
 only by a successful creation response and is sent by clients as
 `Authorization: Bearer loom_agent_…`. Machine clients use `GET /api/agent/me`,
 `GET /api/agent/project`, `GET /api/agent/documents`, and
 `GET /api/agent/documents/{document_id}`. These routes resolve the live project
-corpus on every request and expose no mutation capabilities.
+corpus on every request. Existing and newly created credentials are read-only by
+default. Owners may explicitly grant `agent_checkin:write`; that capability alone
+permits `POST /api/agent/check-in` with `{ "value": "..." }` (1–500 characters),
+recorded as dedicated machine check-in provenance rather than a document or human
+action. Current credential and project lifecycle state is rechecked at commit time.

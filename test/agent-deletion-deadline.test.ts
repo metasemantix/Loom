@@ -20,7 +20,7 @@ async function participant(){
 }
 
 beforeEach(async()=>{
-  await env.DB.exec("DELETE FROM machine_read_audit; DELETE FROM project_machine_credentials; DELETE FROM account_events; DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
+  await env.DB.exec("DELETE FROM machine_read_audit; DELETE FROM project_machine_checkins; DELETE FROM project_machine_credentials; DELETE FROM account_events; DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
 });
 
 it("fails machine reads closed at the project deletion deadline before finalization",async()=>{

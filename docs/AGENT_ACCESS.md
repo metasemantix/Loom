@@ -180,3 +180,13 @@ Do not add:
 - reuse of `DEV_AUTH_BYPASS` for deployed machine access.
 
 Those are later slices. The purpose of this slice is to establish one real, revocable, inspectable path from an external agent/client into a live Loom project corpus.
+
+## Bounded check-in extension
+
+The next machine-access slice preserves project corpus reads as the default and
+adds the explicit stable capability `agent_checkin:write`. Owners may opt into it
+when creating a credential; existing credentials remain read-only. It authorizes
+only a bounded project check-in event, never document, membership, invitation,
+project, or credential mutation. The server rechecks the live credential and
+active project lifecycle at the check-in commit boundary and records machine
+credential provenance in a dedicated event shape.

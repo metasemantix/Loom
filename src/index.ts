@@ -3,7 +3,7 @@ import { context, createDocument, deleteDocument, history, listDocuments, readDo
 import { json, parseCookies, problem, requireSameOrigin } from "./http";
 import type { Env } from "./types";
 import { exportSpace } from "./export";
-import { controlRoomPage, documentPage, invitationPage, loginPage, projectsPage, projectDocumentPage, spacePage } from "./ui";
+import { agentPage, controlRoomPage, documentPage, invitationPage, loginPage, projectsPage, projectDocumentPage, spacePage } from "./ui";
 import { getProfile, updateProfile } from "./profile";
 import { changeRole, createInvitation, createProject, getProject, linkDocument, listOwnedContributions, listProjects, previewInvitation, reauthorizeContribution, removeMember, respondInvitation, revokeInvitation, setProjectLifecycle, recoverOwnerlessProject, transferOwnership, unlinkDocument, updateProject } from "./projects";
 import { accountLifecycle, cancelDeletion, finalizeDueAccounts, provenanceIdentifier, scheduleDeletion } from "./accounts";
@@ -12,7 +12,7 @@ import { createProjectDocument, deleteProjectDocument, listCreatorEntitlements, 
 import { exportProject } from "./export";
 import { cancelProjectDeletion, scheduleProjectDeletion } from "./project-deletion";
 import { devAuthEnabled, establishDevSession, markDevAuth } from "./dev-auth";
-import { createCredential, listCredentials, machineRead, revokeCredential } from "./agent-access";
+import { checkIn, createCredential, listCredentials, machineRead, revokeCredential } from "./agent-access";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -80,9 +80,13 @@ async function discordCallback(request: Request, env: Env): Promise<Response> {
 
 async function handleRequest(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url), path = url.pathname;
+    if(request.method==="GET"&&path==="/llms.txt")return new Response("# Loom\n\nLoom is a participant-owned document and project service.\nHumans authenticate with Discord at /login.\nMachine callers start at /agent and use opaque bearer credentials in the Authorization header.\nStrict discovery: /.well-known/loom-agent\n",{headers:{"content-type":"text/plain; charset=utf-8","cache-control":"public, max-age=3600"}});
+    if(request.method==="GET"&&path==="/.well-known/loom-agent")return json({service:"Loom",protocolVersion:"1",entrance:"/agent",authentication:{scheme:"Bearer",transport:"Authorization header"},endpoints:{introspection:"/api/agent/me",project:"/api/agent/project",documents:"/api/agent/documents",document:"/api/agent/documents/{document_id}",checkin:"/api/agent/check-in"},orientation:"/llms.txt"});
+    if(request.method==="GET"&&path==="/agent")return agentPage();
     if (path === "/api/agent/me") return machineRead(request,env,"introspect");
     if (path === "/api/agent/project") return machineRead(request,env,"project");
     if (path === "/api/agent/documents") return machineRead(request,env,"documents");
+    if(path==="/api/agent/check-in")return checkIn(request,env);
     const agentDocumentMatch=path.match(/^\/api\/agent\/documents\/(doc_[a-z0-9]+)$/);
     if(agentDocumentMatch)return machineRead(request,env,"document",agentDocumentMatch[1]);
     if (request.method === "GET" && path === "/") return Response.redirect(`${url.origin}/me`, 302);

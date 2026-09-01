@@ -1,5 +1,8 @@
 # Changelog
 
+- Added public `/llms.txt` and `/.well-known/loom-agent` discovery, plus an austere `/agent` bearer-token workbench over Loom's existing machine API.
+- Added owner-opt-in `agent_checkin:write` credentials and bounded machine check-ins with durable credential-attributed project activity; existing credentials remain read-only.
+
 - Improved project cards with reload-on-expand show/hide details, clearer contribution and leave controls, owner-side contribution restoration, and a safe human-readable structured activity timeline.
 
 - Fixed archived-project Unarchive confirmation rendering and removed duplicated project overview details from the expanded administration view.
