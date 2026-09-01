@@ -310,3 +310,47 @@ Loom should maintain a changelog as the project evolves.
 The changelog records meaningful changes to Loom itself—features, behavior, interfaces, compatibility, and other externally relevant changes—rather than serving as the provenance history of individual user artifacts.
 
 Artifact-level history and the project changelog are separate concerns.
+
+## Human and agent interfaces are alternate renderers of Loom
+
+Humans and agents should not require separate Loom semantics merely because they benefit from different interfaces.
+
+The human web application may optimize for explanation, visual navigation, confirmations, and ordinary browser authentication. A machine-oriented interface may optimize for explicit capabilities, schemas, stable structured responses, and discoverable next actions. Both should invoke the same underlying operations, authorization rules, lifecycle rules, and provenance model.
+
+A human may use the machine-oriented interface if they wish; it is not a secret or privileged back door. Likewise, an agent should not need to scrape or operate the human interface when a machine-oriented representation exists.
+
+The security boundary is authorization, not obscurity or presentation.
+
+### Agent discovery begins before authentication
+
+Loom should advertise the machine-oriented entrance explicitly so an unfamiliar agent does not have to infer its way through the human Discord login flow.
+
+`/llms.txt` should exist from the beginning of the native agent-facing surface and provide short semantic orientation: what Loom is, where agents should begin, and where the machine-readable protocol/discovery information lives.
+
+A complementary `/.well-known/loom-agent` resource may provide strict machine-readable discovery information such as protocol version, authentication methods, entrypoints, and supported representation types.
+
+The ordinary human login remains human-facing. Human pages may advertise the agent representation through non-visual metadata or alternate links without forcing machine-oriented JSON or workflows into the human UI.
+
+### Machine-oriented Loom should advertise available actions
+
+The agent-facing surface should prefer discoverable affordances over endpoint clairvoyance.
+
+A machine-oriented `/agent` entrance may present the operations currently available to the caller, including help/tooltips or equivalent schema information. Before authentication this may be limited to orientation and authentication. After authentication it should advertise only operations authorized by the caller's current identity, grants, project role, and lifecycle state.
+
+The `/agent` surface is a client of Loom's ordinary semantic/API operations, not a second authorization system or shell with ambient authority.
+
+## Public projects and low-friction membership
+
+Public readability and open membership are separate project properties.
+
+A project may be publicly readable without allowing arbitrary participants to join or contribute. Conversely, a project may permit open joining while still applying its ordinary visibility and corpus rules.
+
+Reading a public project does not itself create membership. Otherwise unauthenticated visitors and crawlers would become meaningless members and destroy the usefulness of membership as provenance.
+
+For a project that permits open contribution, joining may be implicit in the successful act of contributing. Loom does not need a ceremonial join step when the participant has already performed an action whose semantics require project membership.
+
+The contribution and membership creation should be one coherent authorization/state transition so Loom can still establish who contributed, when their project relationship began, and what access membership conferred.
+
+Membership provenance should remain inspectable. Where useful, membership records or events may distinguish how the relationship arose, for example through invitation acceptance, explicit join, project creation, or contribution.
+
+Open joining does not imply open write authority beyond the operations the project explicitly permits.
