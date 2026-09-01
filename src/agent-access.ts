@@ -65,9 +65,9 @@ export async function checkIn(request:Request,env:Env){
   if(request.method!=="POST")return problem(405,"method_not_allowed","Check-in requires POST");
   let body:Record<string,unknown>;try{body=await readJson(request)}catch(error){return problem(400,"invalid_request",(error as Error).message)}
   if(typeof body.value!=="string"||!body.value.trim()||body.value.length>CHECKIN_LIMIT)return problem(400,"invalid_request",`value must contain 1 to ${CHECKIN_LIMIT} characters`);
-  const id=opaque("mci"),now=new Date().toISOString();
-  const result=await env.DB.prepare(`INSERT INTO project_machine_checkins(id,credential_id,project_id,value,created_at) SELECT ?,c.id,c.project_id,?,? FROM project_machine_credentials c JOIN projects p ON p.id=c.project_id WHERE c.id=? AND c.revoked_at IS NULL AND c.checkin_enabled=1 AND p.lifecycle_state='active' AND p.deletion_due_at IS NULL`).bind(id,body.value.trim(),now,c.id).run();
+  const id=opaque("mci"),now=new Date().toISOString(),submitted=body.value.trim();
+  const result=await env.DB.prepare(`INSERT INTO project_machine_checkins(id,credential_id,project_id,value,created_at) SELECT ?,c.id,c.project_id,?,? FROM project_machine_credentials c JOIN projects p ON p.id=c.project_id WHERE c.id=? AND c.revoked_at IS NULL AND c.checkin_enabled=1 AND p.lifecycle_state='active' AND p.deletion_due_at IS NULL`).bind(id,submitted,now,c.id).run();
   if(!result.meta.changes){await audit(env,c.id,c.project_id,"agent_checkin",null,false,"capability_or_project_unavailable");return problem(403,"capability_unavailable","The credential does not currently have check-in authority")}
   await audit(env,c.id,c.project_id,"agent_checkin",null,true,"allowed");
-  return json({checkin:{id,projectId:c.project_id,credentialId:c.id,value:body.value.trim(),createdAt:now}},201);
+  return json({checkin:{id,projectId:c.project_id,credentialId:c.id,value:submitted,createdAt:now}},201);
 }
