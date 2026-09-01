@@ -1,75 +1,227 @@
 # Current Codex Task
 
-Implement the first bounded Loom machine/agent access slice: **revocable read-only project credentials and an agent-readable project corpus API**.
+Implement Loom's next bounded machine-access slice: **native agent discovery/entrance plus an explicit check-in write capability**.
 
-Read and follow `AGENTS.md`. Read `docs/AGENT_ACCESS.md` first; it is normative for this slice. Also read `DECISIONS.md`, `docs/PROJECT_LIFECYCLE.md`, `docs/CONTRIBUTION_LIFECYCLE.md`, `docs/PROJECT_NATIVE_DOCUMENTS.md`, and `docs/TESTING_MODEL.md` before changing authorization or schema behavior.
+Read and follow `AGENTS.md`. Read `docs/AGENT_ACCESS.md`, `DECISIONS.md`, and `docs/agent-ux-capabilities-and-scheduling.md` first. Also read `docs/TESTING_MODEL.md`, `docs/PROJECT_LIFECYCLE.md`, and the current `src/agent-access.ts` / routing implementation before changing authorization or schema behavior.
+
+The existing deployed read-only machine-access slice is the baseline, not work to reimplement. Preserve its routes and semantics:
+- `GET /api/agent/me`
+- `GET /api/agent/project`
+- `GET /api/agent/documents`
+- `GET /api/agent/documents/{document_id}`
+- owner-managed revocable project credentials under `/api/projects/{project_id}/agent-credentials`
 
 ## Goal
 
-Make the deployed Loom useful to an external generic agent/client without requiring a Discord browser session or scraping human HTML.
+Give an unfamiliar external agent a clear Loom-native entrance that does not require colliding with Discord login or scraping the human UI, and add one deliberately tiny mutation proving that machine authority can be narrower than general write access.
 
-A project owner must be able to create a named, project-scoped machine credential, receive its opaque bearer token exactly once, and later revoke it. A caller presenting that token can discover and read the project's currently authorized corpus through a small JSON API. Current Loom ownership, contribution, visibility, and lifecycle state remain authoritative on every request.
+The intended path is:
 
-Do not create a separate agent species or `is_agent` authorization path. Identity/provenance, authentication method, and authorization grant are separate concepts as defined in `docs/AGENT_ACCESS.md`.
+```text
+/llms.txt
+  -> /.well-known/loom-agent
+  -> /agent
+  -> authenticate with an existing project machine credential
+  -> discover currently available capabilities
+  -> read project corpus
+  -> optionally perform a scoped check-in if that credential was explicitly granted check-in authority
+```
+
+Human and agent surfaces remain alternate renderers of the same Loom semantics. Do not create a parallel agent authorization system.
 
 ## Required implementation
 
-- Add the minimal schema/migration needed for project-scoped machine credentials/grants and read-request audit/provenance records.
-- Store only a one-way token hash/fingerprint, never the recoverable raw bearer token.
-- Generate bearer tokens with a cryptographically secure random source and return the raw token only in the successful creation response.
-- Add owner-only project UI/API operations to create a named credential, list safe credential metadata, and revoke an active credential.
-- Add bearer authentication for a small JSON machine API equivalent to:
-  - caller/credential introspection;
-  - project metadata/index;
-  - project document discovery/listing;
-  - individual document retrieval.
-- Keep route naming consistent with the existing application where sensible; document the final routes.
-- Add a nullable manual **compression** field/surface for documents as required by `docs/AGENT_ACCESS.md`. Compression is content-classified and follows read authorization; it is not public technical metadata merely because it is short.
-- Discovery responses must distinguish technical/discovery metadata, nullable compression, and full-content retrieval rather than embedding body excerpts as metadata.
-- Resolve every discovery/retrieval request against current project/document state. Do not snapshot/copy corpus content into credential records.
-- Preserve participant-owned contribution semantics, project-native ownership, `agent_only` behavior, archive/deletion rules, retraction, source deletion, and current project read policy.
-- Record safe read-request audit/provenance data sufficient to identify credential/grant, project, operation/target, timestamp, and allowed/denied result without logging bearer tokens or document content.
-- Revocation must take effect on the next request.
-- Machine endpoints are read-only in this slice. Reject or omit mutation capabilities rather than quietly inheriting browser-session mutation routes.
+### 1. `/llms.txt`
+
+Add a small public plain-text agent orientation document.
+
+It should:
+- identify Loom briefly;
+- say that `/login` / Discord is the human authentication path;
+- direct machine callers to `/agent`;
+- link the strict discovery document at `/.well-known/loom-agent`;
+- mention bearer authentication at a high level without exposing secrets or project-specific information;
+- remain concise, deterministic, and useful to both humans and models.
+
+Do not turn `llms.txt` into exhaustive API documentation.
+
+### 2. `/.well-known/loom-agent`
+
+Add a public JSON discovery resource containing stable, non-secret protocol metadata.
+
+At minimum expose:
+- service name;
+- machine-interface/protocol version;
+- agent entrance URL;
+- bearer authentication scheme;
+- canonical existing read endpoints;
+- the check-in endpoint;
+- a reference to `/llms.txt`.
+
+Do not advertise project-specific capabilities before authentication. Do not leak credential state, project identity, or private corpus metadata.
+
+### 3. `/agent` machine-oriented entrance
+
+Add a deliberately austere, human-readable machine-oriented page/workbench.
+
+It is not a privileged shell. It must use the same existing machine API and authorization rules.
+
+Requirements:
+- explain that this is Loom's machine-oriented interface and point humans to the ordinary Loom interface/login;
+- provide a safe way to enter an opaque bearer token for the current page session;
+- do not put bearer tokens in URLs, query strings, DOM-visible logs, command history, `localStorage`, or server logs;
+- do not persist the raw token beyond what is required for the active client interaction;
+- after authentication, use `GET /api/agent/me` to show the authenticated grant/project metadata and current advertised capabilities;
+- provide simple controls/commands for the existing read operations;
+- advertise/render the check-in action only when the authenticated credential currently has that capability;
+- present stable structured responses and concise help/tooltips rather than a decorative human dashboard.
+
+A literal shell parser is not required. Prefer a small robust text-oriented workbench over unnecessary terminal emulation.
+
+If generated inline browser JavaScript is used, follow the rendered-program validation rules in `AGENTS.md`.
+
+### 4. Explicit check-in capability
+
+Extend project machine credentials with one explicit opt-in mutation capability, conceptually `agent_checkin:write`.
+
+Preserve current behavior:
+- existing credentials remain read-only;
+- newly created credentials are read-only unless the owner explicitly enables check-in authority;
+- check-in authority does not imply document write, membership, invitation, project administration, credential administration, or any other mutation.
+
+Use the smallest migration/schema extension that expresses this cleanly. Do not introduce a general-purpose ACL/capability framework merely for this slice.
+
+Update the owner credential-management surface so the owner deliberately chooses whether a new credential may check in. Existing credential listings should show this safe capability metadata.
+
+### 5. Check-in operation
+
+Add an authenticated machine endpoint:
+
+`POST /api/agent/check-in`
+
+Accept a small bounded JSON payload, for example a required `value` or `message` string with a conservative length limit.
+
+A successful check-in must:
+- require a valid non-revoked credential with explicit check-in authority;
+- resolve current project lifecycle/credential state at mutation time;
+- fail closed if the project state no longer permits forward mutation;
+- record the check-in as a dedicated project/machine event or similarly inspectable provenance record;
+- retain credential/grant identity, project, timestamp, and bounded submitted value;
+- never be represented as a document revision or fake human action.
+
+Do not allow check-in on archived, deletion-scheduled/read-only, deleted, or shell projects. Follow the settled rule that archival freezes forward project mutation.
+
+Keep the stored check-in intentionally small. It exists to prove an authorized machine-originated mutation path, not to become a message board.
+
+### 6. Capability discovery
+
+Extend `GET /api/agent/me` (or its returned representation) so callers can discover their currently available semantic operations.
+
+Use explicit stable capability identifiers. At minimum distinguish:
+- project/corpus read capability already provided by the credential;
+- `agent_checkin:write` only when granted and currently exercisable.
+
+Do not infer or advertise unavailable mutations. The server remains authoritative even after capability discovery; stale discovery must not authorize a later mutation.
 
 ## Acceptance coverage
 
-Extend the stable acceptance model rather than creating an unrelated test universe. Cover at minimum:
+Extend the existing acceptance world and standing `actor + operation + target + relevant state -> expected result + expected state transition` model.
 
-- owner creates credential and raw token is returned once;
-- non-owner cannot create/revoke project credentials;
-- stored database state cannot recover the raw token;
-- valid bearer credential can introspect its project grant;
-- valid credential can discover the currently authorized project corpus;
-- valid credential can retrieve an authorized participant-owned contribution;
-- valid credential can retrieve an authorized project-native document;
-- metadata/compression/full-content boundaries follow current access rules;
-- a document outside the scoped project cannot be retrieved through the credential;
-- retraction/source unavailability is reflected on the next request;
-- archived-project reads follow settled archived-project semantics;
-- deletion-scheduled/deleted/shell states do not gain special machine access;
-- malformed, unknown, and revoked tokens fail closed;
-- revocation is immediate for subsequent requests;
-- audit records identify the credential/project/operation/result without storing secrets or body content.
+Cover at minimum:
 
-Use the standing `actor + operation + target + relevant state -> expected result + expected state transition` model from `docs/TESTING_MODEL.md`.
+### Discovery/entrance
+- `/llms.txt` is public, plain text, concise, and points to the agent entrance/discovery document;
+- `/.well-known/loom-agent` is public JSON and leaks no project/credential-specific information;
+- human `/login` behavior remains intact;
+- `/agent` loads without authentication and clearly distinguishes the human and machine paths;
+- rendered browser JavaScript parses and the primary workbench flow is functionally smoke-tested where the environment permits.
+
+### Capability grant
+- existing credential rows migrate as read-only;
+- owner can create a read-only credential;
+- owner can explicitly create a check-in-enabled credential;
+- non-owner cannot grant/change machine capabilities;
+- safe credential listings expose capability metadata without raw token/hash leakage.
+
+### Check-in
+- read-only credential receives no check-in capability and `POST /api/agent/check-in` is rejected;
+- check-in-enabled credential sees `agent_checkin:write` in introspection and can successfully check in;
+- successful check-in creates inspectable provenance tied to the machine credential/grant and project;
+- check-in cannot mutate documents, membership, project settings, roles, invitations, or credentials;
+- malformed/oversized payloads fail closed;
+- malformed, unknown, and revoked bearer tokens fail closed;
+- revocation blocks the next check-in immediately;
+- archived/deletion-scheduled/deleted/shell state blocks check-in;
+- a stale preflight/introspection result cannot allow a check-in after project state or credential authority changes.
+
+### Regression
+- all existing agent read routes and current live-state semantics continue to work unchanged;
+- current human project/credential-management behavior remains intact except for the added explicit capability choice.
 
 ## Migration and deployment safety
 
-This slice will add a production migration. Follow the repository's LF line-ending rule for migration SQL; the first production deployment exposed Wrangler/D1 failures on CRLF trigger migrations.
+This slice may extend the existing machine-credential schema and add a small provenance/check-in table or event shape.
 
-Test the migration on both a fresh database and a representative existing database state. Never reset existing user data to make the migration pass.
+Follow the repository's migration rules:
+- LF line endings;
+- test fresh initialization;
+- test upgrade from a representative existing database containing current read-only credentials;
+- never reset existing user data to make the migration pass.
+
+Existing credentials must become/read as check-in-disabled without manual repair.
 
 ## Scope boundaries
 
-Do not implement agent writes, bounded mutation capabilities, agent-to-agent messaging, autonomous delegation, per-document machine ACLs, JWTs, AI-generated compressions, custom domains, CI/CD, or a separate agent ownership ontology.
+Do not implement:
+- arbitrary agent/document writes;
+- general capability delegation;
+- agent signup or first-class autonomous agent identity;
+- public/open project membership;
+- project administration by agents;
+- ownership transfer by agents;
+- agent-to-agent messaging;
+- JWTs;
+- per-document machine ACLs;
+- automatic AI-generated metadata/compression;
+- a full terminal emulator;
+- a second agent-only ownership or permission ontology.
 
-Do not reuse `DEV_AUTH_BYPASS` as machine authentication. Do not weaken existing human/browser authorization to make the machine API convenient.
+Do not weaken the human/browser auth model or reuse `DEV_AUTH_BYPASS`.
+
+## Documentation
+
+Update README/API documentation to describe:
+- `/llms.txt`;
+- `/.well-known/loom-agent`;
+- `/agent`;
+- the explicit check-in capability and endpoint;
+- the fact that existing credentials remain read-only by default.
+
+If implementation settles any previously exploratory detail, update the appropriate architecture note narrowly rather than rewriting unrelated design material.
 
 ## Validation
 
-Run all validation required by `AGENTS.md`, including acceptance tests, typecheck, `git diff --check`, and the smallest meaningful rendered/browser smoke test for the credential management UI where the environment permits it.
+Run the validation required by `AGENTS.md`:
 
-Also exercise the machine API end-to-end with a generated credential using a generic HTTP client in the test environment: create -> authenticate -> discover -> retrieve -> change source/project state -> observe updated access -> revoke -> confirm rejection.
+```text
+npm test
+npm run typecheck
+git diff --check
+```
 
-At completion, report the schema/API/UI changes, exact machine routes and authentication format, acceptance coverage, migration results, security-sensitive design choices, and any validation that could not be performed.
+Also exercise the smallest meaningful end-to-end paths:
+1. create read-only credential -> authenticate -> discover reads -> verify no check-in;
+2. create check-in-enabled credential -> authenticate -> discover capability -> check in -> inspect provenance;
+3. revoke -> confirm both read/check-in behavior follows current authority;
+4. change project lifecycle to archived -> confirm check-in fails while settled read behavior remains intact.
+
+At completion, report:
+- schema/migration changes;
+- exact public discovery/agent routes;
+- exact capability identifier(s);
+- check-in payload and provenance shape;
+- acceptance coverage;
+- browser/workbench smoke-test result;
+- migration test result;
+- passed, failed, and unperformed validation separately;
+- any unresolved architecture question rather than silently expanding scope.
