@@ -12,6 +12,10 @@ messaging, semantic search, or backend AI.
 See [`CHANGELOG.md`](./CHANGELOG.md) for notable application and interface
 changes.
 
+See [`docs/DOCUMENT_LIFECYCLE.md`](./docs/DOCUMENT_LIFECYCLE.md) for the shared
+document/revision model and the planned version-bound compression slice, including
+its distinction from the currently implemented manual compression field.
+
 ## Local development
 
 ### Fresh machine setup

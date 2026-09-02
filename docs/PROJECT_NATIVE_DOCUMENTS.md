@@ -6,6 +6,8 @@ A **project-native document** is owned by the project itself. It is not a partic
 
 These semantics are normative for the project-native-document implementation slice.
 
+The shared document revision and version-bound compression model is defined in [DOCUMENT_LIFECYCLE.md](./DOCUMENT_LIFECYCLE.md). Compression and its history follow content access and deletion rules; they are not unrestricted metadata. The compression-versioning extension is specified there as pending implementation.
+
 ## Core distinction
 
 Loom has two fundamentally different ways for participant material to appear in a project:

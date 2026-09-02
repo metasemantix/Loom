@@ -85,6 +85,8 @@ For the first slice this is a nullable, inspectable field maintained manually by
 
 Compression is classified content rather than harmless technical metadata. A caller may receive it only when current project read rules permit it.
 
+The shared identity, revision, history, and freshness contract is defined in [DOCUMENT_LIFECYCLE.md](./DOCUMENT_LIFECYCLE.md). The initial nullable field is implemented; source-version binding and compression revisions are the next documented slice. Once implemented, agent discovery and retrieval must explicitly distinguish current, stale, missing, and legacy-unknown compression and expose its relationship to the current full-text revision. Compression history must obey content access rules as well.
+
 ### 3. Full content
 
 The authoritative current document body available through the project according to current Loom access rules.

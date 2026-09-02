@@ -2,6 +2,8 @@
 
 This document defines how participant-owned documents behave when they are exposed through Loom projects.
 
+The shared document revision and version-bound compression model is defined in [DOCUMENT_LIFECYCLE.md](./DOCUMENT_LIFECYCLE.md). Compression and its history follow content access and deletion rules; they are not unrestricted metadata. The compression-versioning extension is specified there as pending implementation.
+
 ## Core invariant
 
 Project membership, document ownership, and contribution presence are independent relationships.
