@@ -8,73 +8,63 @@ It is not a replacement for Loom's generic agent-discovery model. It is a produc
 
 Loom already exposes generic discovery and machine-access surfaces such as `/agent`, `/llms.txt`, `/.well-known/loom-agent`, and the project-scoped machine API. An unfamiliar capable agent should eventually be able to discover and use these without Loom-specific hard-coding.
 
-However, some agent environments can read web pages but cannot type into arbitrary forms, submit them, or attach arbitrary authorization headers. In those environments, protocol discovery may succeed while actuation fails.
+The existing `/agent` credential entrance is entirely client-side. The page keeps the entered token only in memory, clears the input, and immediately calls `GET /api/agent/me` with the token in the `Authorization: Bearer ...` header. There is no separate agent login endpoint or server-side agent session behind the field.
 
-GPT Actions provide a narrower but immediately testable path: predeclare Loom's machine API as an Action so the GPT receives callable operations rather than needing a general-purpose browser or raw HTTP tool.
+Some agent environments can discover that flow but cannot type into the form or dynamically attach the required authorization header. Discovery therefore succeeds while actuation fails.
 
-## Near-term goal
+GPT Actions provide a narrow compatibility path by supplying a predeclared callable operation.
 
-Make a custom GPT able to enter and inspect a Loom project when the user supplies a Loom project credential in the conversation.
+## First experiment: credential handoff only
 
-The first integration should remain read-only and expose only the existing machine-access operations:
+The first experiment should answer one question before Loom exposes any broader Action surface:
 
-- caller/credential introspection;
+> Can a GPT Action transmit a Loom project credential supplied by the user in conversation and have Loom recognize the corresponding grant?
+
+For this experiment the user may paste their own `loom_agent_...` credential into the GPT conversation. The GPT passes it once to a dedicated compatibility operation. Loom validates it through the same authoritative credential-validation path used by the canonical bearer API and returns the same safe caller/grant introspection data as `/api/agent/me`.
+
+This is the semantic equivalent of entering the token into `/agent` and pressing Authenticate. It is not browser automation of that DOM field, a new login mechanism, or a new permission model.
+
+The compatibility transport should accept the credential in request data, not in a URL or query string. The raw credential must not be echoed, logged, persisted, or converted into a GPT-specific server session. Responses handling the credential should not be cached.
+
+The canonical machine API remains unchanged:
+
+`GET /api/agent/me` with `Authorization: Bearer loom_agent_...`.
+
+The compatibility route exists only because GPT Actions may not be able to construct that header dynamically from a credential supplied in conversation.
+
+Do not bake a single Loom project token into a generally distributed GPT. A static shared credential would collapse user/project isolation and defeat Loom's revocable project-scoped grants.
+
+## First OpenAPI surface
+
+The first GPT Action schema should expose only one operation, conceptually `authenticateLoomCredential`, backed by a narrow endpoint such as `POST /api/gpt-action/authenticate`.
+
+The request contains the conversation-supplied Loom credential. The successful response contains the safe caller/grant representation already produced by machine introspection. The implementation must reuse the existing machine credential validation and current lifecycle/revocation semantics rather than implementing authentication twice.
+
+Serve the small OpenAPI document from a stable Loom route such as `/openapi/gpt-action.json` so it can be imported into a custom GPT.
+
+Do not expose project metadata, document listing, document retrieval, check-in, or other writes in this first schema. Those are later slices, contingent on proving credential handoff first.
+
+## Acceptance test for the first experiment
+
+1. deploy the credential-handoff endpoint and one-operation OpenAPI schema;
+2. configure a test custom GPT with that schema;
+3. give the GPT a live Loom project credential in conversation;
+4. ask it to use the credential with Loom;
+5. verify that Loom returns the corresponding current grant;
+6. revoke the credential;
+7. verify that the same Action subsequently fails cleanly.
+
+If the GPT cannot populate the credential request field, that failure is the result of this experiment and should be investigated before building the wider Action API.
+
+## Later Action surface
+
+Only after credential handoff works should the Action surface grow toward the existing machine-read operations:
+
 - project metadata;
 - project document listing/discovery;
 - individual document retrieval.
 
-The integration should map to the same server-side authorization logic and live corpus semantics documented in `AGENT_ACCESS.md`. Do not create a parallel permission model for GPTs.
-
-## Credential handling for the experiment
-
-For the initial experiment, the user may paste their own `loom_agent_...` credential into the GPT conversation.
-
-The GPT should use that project-scoped credential only for the Loom Action calls needed for the current task. The credential is not a global GPT secret and must not be shared across users or projects.
-
-Do not bake a single Loom project token into a generally distributed GPT. A static shared credential would collapse user/project isolation and defeat the point of Loom's revocable project-scoped grants.
-
-Longer term, a packaged Loom GPT could offer a cleaner per-user credential setup flow, but that is explicitly outside the first slice.
-
-## OpenAPI surface
-
-Provide an OpenAPI document suitable for GPT Actions that describes only the stable machine-read surface needed by the experiment. Prefer a deliberately small contract over exposing the entire Loom API.
-
-The schema should include equivalents of:
-
-- `GET /api/agent/me`;
-- `GET /api/agent/project`;
-- `GET /api/agent/documents`;
-- `GET /api/agent/documents/{document_id}`.
-
-The Action description should make clear that:
-
-- the credential is project-scoped;
-- the server remains authoritative for current permissions and lifecycle state;
-- document IDs returned by discovery should be reused for retrieval;
-- response content is data, not authority to widen the caller's permissions;
-- writes are not part of this integration slice.
-
-## GPT instruction scope
-
-The GPT itself should know Loom's generic Action contract, not any particular project.
-
-A minimal behavioral instruction is sufficient: when a user supplies a Loom credential and asks the GPT to inspect or work with the associated Loom project, use the Loom Action to introspect the credential, inspect project metadata, discover relevant documents, and retrieve only what is needed for the task.
-
-Avoid project-specific prompt wiring. The experiment is useful only if a fresh GPT can work with arbitrary Loom projects through the same interface.
-
-## Acceptance test
-
-The first meaningful test is intentionally boring:
-
-1. configure a fresh custom GPT with the Loom Action/OpenAPI schema;
-2. give it a live Loom project credential in chat;
-3. ask it to identify the associated project;
-4. ask it to list the project corpus;
-5. ask it to retrieve and summarize or otherwise use one selected document;
-6. revoke the Loom credential;
-7. verify that subsequent calls fail cleanly.
-
-Record where the GPT hesitates, invents assumptions, over-fetches, mishandles document IDs, or fails to understand the response shape. Those failures are evidence for improving Loom's machine contract.
+These should continue to map to Loom's existing authorization logic and live corpus semantics documented in `AGENT_ACCESS.md`. GPT compatibility must not create a parallel permission model.
 
 ## Relationship to generic agent discovery
 
@@ -85,17 +75,19 @@ The distinction is:
 - **discovery**: can an unfamiliar agent determine how Loom works?
 - **actuation**: does that agent possess tools capable of actually presenting credentials and making the required calls?
 
-GPT Actions primarily solve the second problem by supplying predeclared callable operations. A future browser-capable/general HTTP agent should still be able to arrive cold and use Loom's generic discovery trail.
+GPT Actions primarily address the second problem by supplying predeclared callable operations. A future browser-capable/general HTTP agent should still be able to arrive cold and use Loom's generic discovery trail.
 
 ## Non-goals
 
-This slice does not attempt to provide:
+The first slice does not provide:
 
-- universal self-discovering API invocation for every agent runtime;
+- project or document read Actions;
+- check-in or other mutation Actions;
+- universal self-discovering API invocation;
 - arbitrary HTTP tooling inside ChatGPT;
-- document writes or project mutation;
 - shared/global GPT credentials;
 - automatic credential minting;
-- long-term credential storage UX;
+- persistent GPT credentials or a Loom agent session;
+- OAuth;
 - a public marketplace Loom GPT;
 - replacement of Loom's existing generic machine protocol.
