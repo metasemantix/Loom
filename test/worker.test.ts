@@ -762,4 +762,20 @@ describe("read-only machine access",()=>{
     await env.DB.prepare(`UPDATE projects SET deletion_due_at=? WHERE id=?`).bind("2026-01-01T00:00:00.000Z",projectId).run();const {finalizeDueProjects}=await import("../src/project-deletion");await finalizeDueProjects(env,new Date("2026-01-01T00:00:00.000Z"));
     expect(await env.DB.prepare(`SELECT lifecycle_state FROM projects WHERE id=?`).bind(projectId).first()).toEqual({lifecycle_state:"shell"});expect(await env.DB.prepare(`SELECT revoked_at FROM project_machine_credentials WHERE id=?`).bind(credential.credential.id).first()).toEqual({revoked_at:"2026-01-01T00:00:00.000Z"});expect((await SELF.fetch(`${origin}/api/agent/me`,{headers})).status).toBe(401);
   });
+
+  it("versions Agent compression independently and keeps revision alignment truthful",async()=>{
+    const alice=await participant("compression"),documentId=await create(alice.cookie);
+    const first=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>()),source=first.document.current_version_id;
+    const save=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:first.document.title,logicalPath:first.document.logical_path,visibility:first.document.visibility,compression:"Bound semantic text",sourceVersionId:source})});expect(save.status).toBe(200);
+    expect((await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document).toMatchObject({compression:"Bound semantic text",compression_source_version_id:source,compression_freshness:"current"});
+    await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Metadata only",logicalPath:first.document.logical_path,visibility:first.document.visibility})});
+    expect((await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document.compression_freshness).toBe("current");
+    await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({content:"new full text",contentType:"text/markdown"})});
+    const stale=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(stale.document.compression_freshness).toBe("stale");
+    const conflict=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Must not commit",logicalPath:"must-not-commit.md",visibility:"public",compression:"wrong binding",sourceVersionId:source})});expect(conflict.status).toBe(409);
+    const afterConflict=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(afterConflict.document).toMatchObject({title:stale.document.title,logical_path:stale.document.logical_path,visibility:stale.document.visibility,compression:"Bound semantic text",compression_freshness:"stale"});
+    const refreshed=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:stale.document.title,logicalPath:stale.document.logical_path,visibility:stale.document.visibility,compression:"Fresh semantic text",sourceVersionId:stale.document.current_version_id})});expect(refreshed.status).toBe(200);
+    const history=await SELF.fetch(`${origin}/api/me/documents/${documentId}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(history.compressionRevisions).toHaveLength(2);expect(history.compressionRevisions.map((x:any)=>x.text)).toEqual(["Fresh semantic text","Bound semantic text"]);
+  });
+
 });

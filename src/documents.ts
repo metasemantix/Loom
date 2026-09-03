@@ -1,6 +1,7 @@
 import { opaque } from "./auth";
 import { json, problem, readJson } from "./http";
 import type { Env, Principal } from "./types";
+import { compressionJoins, compressionSelect, saveCompressionStatements } from "./compression";
 
 const CONTENT_TYPES = new Set(["text/markdown", "application/json", "text/plain"]);
 const KINDS = new Set(["profile", "introduction", "document"]);
@@ -13,12 +14,16 @@ interface DocumentRow {
   created_at: string; version_id: string; version_number: number; content: string;
   content_type: string; updated_at: string;
   compression: string | null;
+  current_version_id:string; compression_revision_id:string|null; compression_source_version_id:string|null;
+  compression_source_version_number:number|null; compression_freshness:"missing"|"current"|"stale"|"unknown";
 }
 
 const currentDocuments = `
- SELECT d.id,d.kind,d.title,d.logical_path,d.visibility,d.compression,d.original_filename,d.original_content_type,d.created_at,
+ SELECT d.id,d.kind,d.title,d.logical_path,d.visibility,d.compression,d.original_filename,d.original_content_type,d.created_at
+ ${compressionSelect("d")},
  v.id version_id,v.version_number,v.content,v.content_type,v.created_at updated_at
  FROM documents d JOIN document_versions v ON v.id=d.current_version_id
+ ${compressionJoins("d")}
  WHERE d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL`;
 
 function contentError(content: unknown, contentType: unknown): string | null {
@@ -50,12 +55,13 @@ export async function readDocument(env: Env, principal: Principal, id: string, p
   const owned = await env.DB.prepare(`${currentDocuments} AND d.id=?`).bind(principal.participantId, id).first<DocumentRow>();
   if (owned) return json({ document: owned, canEdit: true, context: "owner" });
   if (!projectId) return problem(404, "not_found", "Document not found");
-  const shared = await env.DB.prepare(`SELECT d.id,d.kind,d.title,d.logical_path,d.visibility,d.compression,d.original_filename,d.original_content_type,d.created_at,
+  const shared = await env.DB.prepare(`SELECT d.id,d.kind,d.title,d.logical_path,d.visibility,d.compression,d.original_filename,d.original_content_type,d.created_at ${compressionSelect("d")},
     v.id version_id,v.version_number,v.content,v.content_type,v.created_at updated_at,u.display_name owner_display_name
     FROM project_documents pd JOIN projects project ON project.id=pd.project_id
     JOIN project_members pm ON pm.project_id=project.id AND pm.participant_id=?
     JOIN documents d ON d.id=pd.document_id AND d.deleted_at IS NULL
     JOIN document_versions v ON v.id=d.current_version_id
+    ${compressionJoins("d")}
     JOIN participants p ON p.id=d.owner_id JOIN users u ON u.id=p.user_id
     WHERE project.id=? AND project.read_audience='members_and_agents' AND pd.state='active' AND d.id=?
       AND (p.account_state!='deletion_pending' OR p.deletion_due_at>?)`)
@@ -101,8 +107,8 @@ export async function uploadDocument(request: Request, env: Env, principal: Prin
   return insertDocument(env, principal, { title, kind: "document", visibility: String(form.get("visibility") || "private"), content, contentType, logicalPath: path, originalFilename: file.name, originalContentType: file.type || contentType });
 }
 
-async function ownedDocument(env: Env, principal: Principal, id: string): Promise<{ id: string; version_number: number; title: string; logical_path: string; visibility: string; compression:string|null } | null> {
-  return env.DB.prepare(`SELECT d.id,d.title,d.logical_path,d.visibility,d.compression,v.version_number FROM documents d JOIN document_versions v ON v.id=d.current_version_id WHERE d.id=? AND d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL`)
+async function ownedDocument(env: Env, principal: Principal, id: string): Promise<{ id: string; current_version_id:string; version_number: number; title: string; logical_path: string; visibility: string; compression:string|null } | null> {
+  return env.DB.prepare(`SELECT d.id,d.current_version_id,d.title,d.logical_path,d.visibility,d.compression,v.version_number FROM documents d JOIN document_versions v ON v.id=d.current_version_id WHERE d.id=? AND d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL`)
     .bind(id, principal.participantId).first();
 }
 
@@ -128,18 +134,27 @@ export async function updateMetadata(request: Request, env: Env, principal: Prin
   if (!validPath(next.logical_path)) return problem(400, "invalid_request", "logicalPath must be a valid relative path");
   if (typeof next.visibility !== "string" || !VISIBILITIES.has(next.visibility)) return problem(400, "invalid_request", "unsupported visibility");
   if(next.compression!==null&&(typeof next.compression!=="string"||next.compression.length>2000))return problem(400,"invalid_request","compression must be null or no more than 2,000 characters");
+  const compressionChanged=next.compression!==document.compression;
+  const sourceVersionId=body.sourceVersionId===undefined?document.current_version_id:body.sourceVersionId;
+  if(compressionChanged&&typeof sourceVersionId!=="string")return problem(400,"invalid_request","sourceVersionId is required when saving compression");
   const changes: Record<string, { previous: string|null; new: string|null }> = {};
   if (next.title.trim() !== document.title) changes.title = { previous: document.title, new: next.title.trim() };
   if (next.logical_path !== document.logical_path) changes.logicalPath = { previous: document.logical_path, new: next.logical_path };
   if (next.visibility !== document.visibility) changes.visibility = { previous: document.visibility, new: next.visibility };
-  if(next.compression!==document.compression)changes.compression={previous:document.compression,new:next.compression};
+  if(compressionChanged)changes.compressionRevision={previous:null,new:"created"};
   if (!Object.keys(changes).length) return json({ document: { id, ...next }, changed: false });
   const now = new Date().toISOString();
   try {
-    await env.DB.batch([
-      env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=?,compression=? WHERE id=? AND owner_id=?`).bind(next.title.trim(), next.logical_path, next.visibility,next.compression, id, principal.participantId),
-      env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) VALUES(?,?,'metadata_changed','human',?,?,?)`).bind(opaque("evt"), id, principal.userId, JSON.stringify(changes), now),
+    const compressionSave=compressionChanged?saveCompressionStatements(env,{documentId:id,text:next.compression,sourceVersionId,actorId:principal.userId,authorizeSql:"d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL",authorizeBindings:[principal.participantId]}):null;
+    const results=await env.DB.batch(compressionChanged ? [
+      ...compressionSave!.statements,
+      env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=? WHERE id=? AND owner_id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?)`).bind(next.title.trim(),next.logical_path,next.visibility,id,principal.participantId,sourceVersionId,compressionSave!.id,compressionSave!.id),
+      env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) SELECT ?,?,'metadata_changed','human',?,?,? WHERE EXISTS(SELECT 1 FROM documents WHERE id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?))`).bind(opaque("evt"),id,principal.userId,JSON.stringify(changes),now,id,sourceVersionId,compressionSave!.id,compressionSave!.id),
+    ] : [
+      env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=? WHERE id=? AND owner_id=?`).bind(next.title.trim(),next.logical_path,next.visibility,id,principal.participantId),
+      env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) VALUES(?,?,'metadata_changed','human',?,?,?)`).bind(opaque("evt"),id,principal.userId,JSON.stringify(changes),now),
     ]);
+    if(compressionChanged&&!results[0]?.meta.changes)return problem(409,"document_version_conflict","The document changed since this compression was prepared");
   } catch { return problem(409, "path_conflict", "That logical path is already in use"); }
   return json({ document: { id, title: next.title.trim(), logicalPath: next.logical_path, visibility: next.visibility }, changed: true });
 }
@@ -159,10 +174,12 @@ export async function history(env: Env, principal: Principal, id: string): Promi
   if (!await ownedDocument(env, principal, id)) return problem(404, "not_found", "Document not found");
   const versions = await env.DB.prepare(`SELECT v.id,v.version_number,v.content,v.content_type,v.actor_type,v.actor_id,CASE WHEN v.actor_type='human' THEN COALESCE(u.display_name,'Unknown person') END actor_display_name,v.created_at FROM document_versions v LEFT JOIN users u ON v.actor_type='human' AND u.id=v.actor_id WHERE v.document_id=? ORDER BY v.version_number DESC`).bind(id).all<Record<string, unknown>>();
   const events = await env.DB.prepare(`SELECT e.id,e.event_type,e.actor_type,e.actor_id,CASE WHEN e.actor_type='human' THEN COALESCE(u.display_name,'Unknown person') END actor_display_name,e.changes_json,e.created_at FROM document_events e LEFT JOIN users u ON e.actor_type='human' AND u.id=e.actor_id WHERE e.document_id=? ORDER BY e.created_at DESC,e.id DESC`).bind(id).all<Record<string, unknown>>();
+  const compressions=await env.DB.prepare(`SELECT cr.id,cr.revision_number,cr.text,cr.source_version_id,sv.version_number source_version_number,cr.actor_type,cr.actor_id,CASE WHEN cr.actor_type='human' THEN COALESCE(u.display_name,'Unknown person') END actor_display_name,cr.created_at,cr.prompt_version,cr.migrated_at FROM compression_revisions cr LEFT JOIN document_versions sv ON sv.id=cr.source_version_id AND sv.document_id=cr.document_id LEFT JOIN users u ON cr.actor_type='human' AND u.id=cr.actor_id WHERE cr.document_id=? ORDER BY cr.revision_number DESC`).bind(id).all<Record<string,unknown>>();
   const parsedEvents = events.results.map((event) => ({ ...event, changes: JSON.parse(event.changes_json as string), changes_json: undefined }));
   const timeline: Array<Record<string, unknown> & { entry_type: string }> = [
     ...versions.results.map((version) => ({ ...version, entry_type: "content_revision" })),
     ...parsedEvents.map((event) => ({ ...event, entry_type: "metadata_event" })),
+    ...compressions.results.map((revision)=>({...revision,entry_type:"compression_revision"})),
   ];
   timeline.sort((left, right) => {
     const timestamp = String(right["created_at"]).localeCompare(String(left["created_at"]));
@@ -170,7 +187,7 @@ export async function history(env: Env, principal: Principal, id: string): Promi
     // A stable tie-break keeps the API deterministic even at D1's timestamp precision.
     return String(right["id"]).localeCompare(String(left["id"]));
   });
-  return json({ versions: versions.results, events: parsedEvents, timeline });
+  return json({ versions: versions.results, compressionRevisions:compressions.results, events: parsedEvents, timeline });
 }
 
 export async function context(_request: Request, env: Env, participantId: string, format: "json" | "md", principal: Principal | null): Promise<Response> {
