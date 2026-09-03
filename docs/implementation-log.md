@@ -147,3 +147,7 @@ After merging or checking out this branch on the normal development machine:
 5. delete a disposable document and confirm the UI removes it after the destructive-history warning;
 6. optionally start OAuth from `http://127.0.0.1:8787` and confirm Loom redirects to the canonical `localhost` start before contacting Discord;
 7. update this entry from **Unverified** to **Executed** as evidence permits.
+
+## 2026-09-03 — Agent compression revisions
+
+Agent compression is now immutable, independently revisioned derived content. Selected revisions carry a same-document full-text source binding, prompt version, timestamp, and saving-actor provenance; authorized human and machine reads expose explicit missing/current/stale/unknown alignment. Legacy strings migrate without invented source, actor, or creation time. Participant and project-native document pages provide the shared canonical manual prompt, alignment status, and inspectable compression history.
