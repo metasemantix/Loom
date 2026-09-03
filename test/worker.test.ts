@@ -688,6 +688,29 @@ describe("project-native documents",()=>{
 });
 
 describe("read-only machine access",()=>{
+  it("hands conversation credentials through canonical introspection and publishes only that GPT Action",async()=>{
+    const owner=await participant("gpt_action_owner");
+    const projectResponse=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Action corpus",readAudience:"agents_only"})});
+    const projectId=(await projectResponse.json<any>()).project.id;
+    const createActionCredential=()=>SELF.fetch(`${origin}/api/projects/${projectId}/agent-credentials`,{method:"POST",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({label:"Action reader"})}).then(r=>r.json<any>());
+    const created=await createActionCredential(),token=created.token;
+    const handoff=(credential:unknown,init:RequestInit={})=>SELF.fetch(`${origin}/api/gpt-action/authenticate`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({credential}),...init});
+
+    const canonical=await SELF.fetch(`${origin}/api/agent/me`,{headers:{authorization:`Bearer ${token}`}}).then(r=>r.json<any>());
+    const accepted=await handoff(token);expect(accepted.status).toBe(200);expect(accepted.headers.get("cache-control")).toBe("no-store");expect(await accepted.json()).toEqual(canonical);
+    for(const credential of ["malformed",`loom_agent_${"0".repeat(36)}`]){const denied=await handoff(credential);expect(denied.status).toBe(401);expect(denied.headers.get("cache-control")).toBe("no-store");expect(await denied.text()).not.toContain(String(credential))}
+    const malformedJson=await SELF.fetch(`${origin}/api/gpt-action/authenticate`,{method:"POST",headers:{"content-type":"application/json"},body:"{"});expect(malformedJson.status).toBe(400);expect(malformedJson.headers.get("cache-control")).toBe("no-store");
+    const unsupported=await SELF.fetch(`${origin}/api/gpt-action/authenticate`,{method:"GET",headers:{authorization:`Bearer ${token}`}});expect(unsupported.status).toBe(405);expect(unsupported.headers.get("cache-control")).toBe("no-store");
+
+    await SELF.fetch(`${origin}/api/projects/${projectId}/archive`,{method:"POST",headers:{cookie:owner.cookie,origin}});expect((await handoff(token)).status).toBe(200);
+    await env.DB.prepare("UPDATE projects SET lifecycle_state='shell' WHERE id=?").bind(projectId).run();expect((await handoff(token)).status).toBe(410);
+    await env.DB.prepare("UPDATE projects SET lifecycle_state='active' WHERE id=?").bind(projectId).run();
+    await SELF.fetch(`${origin}/api/projects/${projectId}/agent-credentials/${created.credential.id}`,{method:"DELETE",headers:{cookie:owner.cookie,origin}});expect((await handoff(token)).status).toBe(401);
+
+    const audits=(await env.DB.prepare("SELECT operation,result_code FROM machine_read_audit ORDER BY occurred_at,id").all()).results;expect(JSON.stringify(audits)).not.toContain(token);
+    const schemaResponse=await SELF.fetch(`${origin}/openapi/gpt-action.json`),schema=await schemaResponse.json<any>();expect(schemaResponse.status).toBe(200);expect(schema.openapi).toBe("3.1.0");expect(Object.keys(schema.paths)).toEqual(["/api/gpt-action/authenticate"]);expect(Object.keys(schema.paths["/api/gpt-action/authenticate"])).toEqual(["post"]);expect(schema.paths["/api/gpt-action/authenticate"].post.operationId).toBe("authenticateLoomCredential");expect(JSON.stringify(schema).match(/operationId/g)).toHaveLength(1);expect(JSON.stringify(schema)).not.toContain(token);
+  });
+
   it("publishes non-secret discovery and a parseable unauthenticated workbench",async()=>{
     const orientation=await SELF.fetch(`${origin}/llms.txt`);expect(orientation.status).toBe(200);expect(orientation.headers.get("content-type")).toContain("text/plain");const text=await orientation.text();expect(text.length).toBeLessThan(500);expect(text).toContain("/agent");expect(text).toContain("/.well-known/loom-agent");expect(text).toContain("/login");
     const discovery=await SELF.fetch(`${origin}/.well-known/loom-agent`).then(r=>r.json<any>());expect(discovery).toMatchObject({service:"Loom",protocolVersion:"1",entrance:"/agent",authentication:{scheme:"Bearer"},orientation:"/llms.txt"});expect(JSON.stringify(discovery)).not.toMatch(/projectId|credential|token_hash/);

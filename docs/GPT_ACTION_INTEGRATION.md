@@ -42,6 +42,8 @@ The request contains the conversation-supplied Loom credential. The successful r
 
 Serve the small OpenAPI document from a stable Loom route such as `/openapi/gpt-action.json` so it can be imported into a custom GPT.
 
+The implemented compatibility route is `POST /api/gpt-action/authenticate`, with an `application/json` body containing only the conversation-supplied `credential`. Its credential-handling responses use `Cache-Control: no-store`. The importable OpenAPI 3.1 document is served at `GET /openapi/gpt-action.json` and exposes only this operation under the stable operation ID `authenticateLoomCredential`.
+
 Do not expose project metadata, document listing, document retrieval, check-in, or other writes in this first schema. Those are later slices, contingent on proving credential handoff first.
 
 ## Acceptance test for the first experiment

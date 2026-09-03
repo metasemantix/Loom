@@ -15,6 +15,7 @@ export const operationBranches = {
   "machine-credential.manage": ["owner.create.allowed","non-owner.create.denied","owner.revoke.allowed","revoked.next-request.denied","shell-finalization.revokes"],
   "machine-corpus.read": ["valid.introspect.allowed","participant-contribution.allowed","project-native.allowed","outside-project.denied","retracted.next-request.denied","archived.allowed","deletion-scheduled.allowed","shell.denied","malformed.denied","unknown.denied","mutation.denied-and-attributed"],
   "agent.discovery": ["llms.public","well-known.public-non-secret","entrance.public-parseable","human-login.unchanged"],
+  "gpt-action.authenticate": ["active.allowed-and-equivalent","malformed.denied","unknown.denied","revoked.denied","archived.allowed","deletion-scheduled.allowed","shell.denied","unsupported-method.denied","credential-not-disclosed","schema.single-operation"],
   "agent-checkin.write": ["read-only.denied","enabled.active.allowed","provenance.owner-inspectable","malformed.denied","oversized.denied","revoked.denied","archived.denied","deletion-scheduled.denied","shell.denied","stale-lifecycle.denied"],
 } as const;
 export const caseName=(operation:keyof typeof operationBranches,branch:string)=>`${operation} :: ${branch}`;
