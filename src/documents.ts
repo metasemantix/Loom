@@ -146,14 +146,15 @@ export async function updateMetadata(request: Request, env: Env, principal: Prin
   const now = new Date().toISOString();
   try {
     const compressionSave=compressionChanged?saveCompressionStatements(env,{documentId:id,text:next.compression,sourceVersionId,actorId:principal.userId,authorizeSql:"d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL",authorizeBindings:[principal.participantId]}):null;
-    const results=await env.DB.batch([
-      env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=? WHERE id=? AND owner_id=?`).bind(next.title.trim(), next.logical_path, next.visibility, id, principal.participantId),
-      ...(compressionSave?.statements??[]),
-      compressionChanged
-        ? env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) SELECT ?,?,'metadata_changed','human',?,?,? WHERE EXISTS(SELECT 1 FROM documents WHERE id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?))`).bind(opaque("evt"), id, principal.userId, JSON.stringify(changes), now,id,compressionSave!.id,compressionSave!.id)
-        : env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) VALUES(?,?,'metadata_changed','human',?,?,?)`).bind(opaque("evt"), id, principal.userId, JSON.stringify(changes), now),
+    const results=await env.DB.batch(compressionChanged ? [
+      ...compressionSave!.statements,
+      env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=? WHERE id=? AND owner_id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?)`).bind(next.title.trim(),next.logical_path,next.visibility,id,principal.participantId,sourceVersionId,compressionSave!.id,compressionSave!.id),
+      env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) SELECT ?,?,'metadata_changed','human',?,?,? WHERE EXISTS(SELECT 1 FROM documents WHERE id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?))`).bind(opaque("evt"),id,principal.userId,JSON.stringify(changes),now,id,sourceVersionId,compressionSave!.id,compressionSave!.id),
+    ] : [
+      env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=? WHERE id=? AND owner_id=?`).bind(next.title.trim(),next.logical_path,next.visibility,id,principal.participantId),
+      env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) VALUES(?,?,'metadata_changed','human',?,?,?)`).bind(opaque("evt"),id,principal.userId,JSON.stringify(changes),now),
     ]);
-    if(compressionChanged&&!results[1]?.meta.changes)return problem(409,"document_version_conflict","The document changed since this compression was prepared");
+    if(compressionChanged&&!results[0]?.meta.changes)return problem(409,"document_version_conflict","The document changed since this compression was prepared");
   } catch { return problem(409, "path_conflict", "That logical path is already in use"); }
   return json({ document: { id, title: next.title.trim(), logicalPath: next.logical_path, visibility: next.visibility }, changed: true });
 }
