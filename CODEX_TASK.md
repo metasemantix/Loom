@@ -1,111 +1,104 @@
 # Current Codex Task
 
-Implement Loom's **Agent compression foundation**: make compression a first-class document UI concept, provide the canonical manual LLM generation prompt, and bind versioned compression revisions to the full-text revisions they describe.
+Implement the bounded **Agent compression manual-workflow v2** follow-up.
 
-Read and follow `AGENTS.md`. Read `docs/DOCUMENT_LIFECYCLE.md` in full before implementation; it is the durable normative contract for this slice. Also read the relevant access/lifecycle documents it references, especially `docs/AGENT_ACCESS.md`, `docs/CONTRIBUTION_LIFECYCLE.md`, `docs/PROJECT_NATIVE_DOCUMENTS.md`, `docs/PROJECT_LIFECYCLE.md`, and `docs/TESTING_MODEL.md`.
-
-Inspect the current schema/migrations, participant-owned and project-native document APIs/UI, document version/history implementation, metadata-event behavior, deletion cleanup, and machine document responses before choosing the implementation shape. Do not reconstruct existing behavior from this task alone.
+Read and follow `AGENTS.md`. Read `docs/DOCUMENT_LIFECYCLE.md` in full before implementation; it is the durable normative contract. Inspect the compression implementation already present in the repository before editing it, including the canonical prompt source, participant-owned and project-native document UI, compression save path/provenance, and existing tests.
 
 ## Goal
 
-Prevent compression from becoming an unversioned summary blob whose relationship to an evolving full document is unknowable.
+Make manual compression generation genuinely one-click and make Loom's 2,000-character compression limit impossible to miss.
 
-After this slice:
+After this slice, an authorized human can click the Agent compression copy control and receive a ready-to-paste external-LLM request containing Loom's canonical v2 instructions, the current document title, and the current full document text. The prompt itself tells the model about the 2,000-character maximum, and the compression editor visibly communicates and counts against the same limit.
 
-- humans can clearly find and understand **Agent compression** in document UI;
-- they can copy Loom's canonical `compression-prompt-v1` for use in an external LLM and paste the reviewed result back into Loom;
-- each newly saved compression is an immutable compression revision bound to the specific full-text revision it describes;
-- Loom can truthfully report compression freshness as `missing`, `current`, `stale`, or legacy `unknown`;
-- previous compression revisions remain inspectable under content-access rules;
-- existing compression data survives migration without fabricated provenance or source-version claims.
+## Current relevant behavior
 
-This is a data/lifecycle foundation, not automatic AI generation.
+The compression foundation introduced versioned compression revisions, freshness/source binding, history, actor provenance, and canonical `compression-prompt-v1`.
+
+The current copy control copies only the prompt template and explicitly does not include document content. The compression textarea enforces a 2,000-character maximum but the limit is not sufficiently discoverable in the UI. New compression saves currently associate the canonical prompt version with the saved revision.
+
+The durable contract has now advanced the manual workflow to `compression-prompt-v2`. Existing compression revisions carrying `compression-prompt-v1` are historical provenance and must not be rewritten.
 
 ## Required implementation
 
-### 1. Persistence and migration
+### 1. Canonical prompt v2
 
-Introduce the minimum schema needed for immutable compression revisions and a selected/current compression per document. Each new compression revision must have its own ID, document ID, text, source full-text version ID, creation timestamp, saving actor provenance using existing provenance conventions, and generation-prompt version when known.
+Update the repository-owned canonical prompt implementation for new manual generation to exactly match the `compression-prompt-v2` contract in `docs/DOCUMENT_LIFECYCLE.md`.
 
-Keep document and compression revision numbering/identity independent. The authoritative relationship is the compression revision's source full-text revision ID.
+The prompt must explicitly include:
 
-Migrate existing non-null `documents.compression` values without losing text. They must become legacy compression data with unknown source-version relationship and without invented original author/model/timestamp. Preserve migration provenance separately where appropriate. Do not silently assert that legacy text describes the current document version.
+`The compression must not exceed 2,000 characters, including spaces.`
 
-Keep compatibility with existing callers deliberately. Do not silently change an existing JSON field from a string/null into an incompatible object. Remove or retain the old storage column only according to a safe migration/compatibility plan; do not leave two independently mutable sources of truth.
+It must also contain the `DOCUMENT TITLE:` and `DOCUMENT:` envelope defined by the durable document.
 
-Ensure document deletion removes content-bearing compression history according to the lifecycle contract.
+Use `compression-prompt-v2` as the canonical prompt version for new saves after this change. Do not mutate or rewrite historical compression revisions that recorded `compression-prompt-v1`.
 
-### 2. Freshness contract
+Keep one canonical prompt implementation reused by both participant-owned and project-native UI. Do not create divergent copies.
 
-Derive selected compression status exactly as defined in `docs/DOCUMENT_LIFECYCLE.md`:
+### 2. Ready-to-paste copy action
 
-- `missing`: no selected compression;
-- `current`: source version equals current full-text version;
-- `stale`: source version is an older revision of this document;
-- `unknown`: preserved legacy compression has no established source revision.
+Change the Agent compression copy control in both participant-owned and project-native document views so it copies one ready-to-paste request containing:
 
-A full-content revision makes an existing bound compression stale without deleting or rebinding it. Metadata-only changes do not affect freshness.
+- the exact canonical `compression-prompt-v2` instructions;
+- the actual current document title in the `DOCUMENT TITLE:` section;
+- the actual current full document text in the `DOCUMENT:` section.
 
-Validate source-version ownership: a source revision must belong to the same document. Reject nonexistent or foreign-document source revisions.
+The title and body must come from the current document state represented by the full-text revision in the view. Reuse the same helper/source for both UI variants where practical.
 
-Avoid races that can falsely label a compression current. Saving from a page representing the current revision must not silently bind an externally generated compression to a newer revision that appeared while the user was working. Use the repository's existing concurrency/update conventions where possible and return a conflict or otherwise preserve the explicitly submitted source revision truthfully.
+This is clipboard-only convenience. The copy action must not:
 
-Editing/saving a stale compression from the current document view creates a new compression revision bound to the current full-text revision. Never mutate historical compression text in place.
+- make a model/API/network request;
+- mutate the document;
+- log or persist a duplicate clipboard payload;
+- put document content in a URL;
+- widen access to document content.
 
-### 3. Document UI
+Update the copy control's label/help/success message as needed so it no longer falsely claims that no document content was copied. It should make clear that the prompt plus document content was copied to the user's clipboard.
 
-Update both participant-owned and project-native document views where compression editing currently exists.
+Do not introduce a Loom-hosted LLM call.
 
-Create a clearly named **Agent compression** section instead of leaving the field anonymous inside Document details.
+### 3. Visible 2,000-character limit and live counter
 
-The section must include:
+In both participant-owned and project-native Agent compression editors:
 
-- concise explanatory help/tooltip: compression is a compact semantic representation agents can use to judge relevance before retrieving full content;
-- a copy control for the canonical repository-owned `compression-prompt-v1` defined in `docs/DOCUMENT_LIFECYCLE.md`;
-- the editable compression field, retaining the current 2,000-character limit;
-- visible freshness and version relationship, e.g. current based on document v7, or stale based on v7 while current full text is v9;
-- timestamp and available actor provenance for the selected compression where appropriate.
+- visibly state that the maximum is 2,000 characters, including spaces;
+- retain the existing input/server-side enforcement;
+- add a live character counter showing `N / 2,000` (or an equally clear localized equivalent);
+- initialize the count correctly from an existing compression;
+- update it immediately as the user edits the field.
 
-Keep the canonical prompt in one code/source location and reuse it rather than duplicating prompt text across UI implementations. Copying the prompt must not send document content anywhere. This slice performs no model/API call.
+Do not weaken server-side validation merely because the browser field has `maxlength`.
 
-Saving pasted compression text must bind it to the document revision the user actually used, following the concurrency rule above.
+### 4. Preserve compression lifecycle semantics
 
-### 4. Compression history
+Do not otherwise change the compression revision model introduced by the foundation slice.
 
-Make compression revisions inspectable now. Reuse/extend the existing document history UI if sensible rather than creating an unnecessary separate history product.
+In particular preserve:
 
-Authorized viewers must be able to distinguish compression revisions from full-content and metadata events and inspect historical compression text plus source document version when known, timestamp, actor provenance when known, and prompt version when known.
+- immutable compression history;
+- source-version binding and current/stale/unknown/missing freshness semantics;
+- stale compression remaining selected and visible after a full-text update;
+- atomic conflict behavior for a compression save accompanied by metadata edits;
+- actor provenance behavior;
+- access/lifecycle restrictions;
+- compatibility fields in machine/API responses.
 
-Restoring/reverting an old compression is not required.
-
-Historical compression is classified/content-bearing data. Do not expose it through metadata-only views, project shells, or any path that would not currently authorize full semantic content.
-
-### 5. API / machine representation
-
-Additively expose enough information in existing authorized document/machine responses to relate the selected compression to the full text: current full-text revision identity, selected compression revision identity, source revision identity when known, freshness, and permitted timestamps/provenance.
-
-Preserve the existing compression string/null field where compatibility requires it; add structured fields rather than changing its type incompatibly.
-
-Do not add new GPT Action document-read operations in this slice.
+A new save using the canonical manual workflow should record `compression-prompt-v2`; existing v1 history stays v1.
 
 ## Tests and acceptance
 
-Implement focused unit/integration/acceptance coverage for the acceptance requirements in `docs/DOCUMENT_LIFECYCLE.md`, including at minimum:
+Add or update focused coverage proving at minimum:
 
-- migration of documents with and without existing compression;
-- no lost legacy text and no fabricated legacy source binding/provenance;
-- current -> stale transition after full-content edit;
-- metadata-only edit does not stale compression;
-- stale compression edit/save creates a new current compression revision while preserving history;
-- missing/current/stale/unknown remain distinguishable;
-- foreign/nonexistent source version rejected;
-- concurrent content update cannot produce a falsely current compression;
-- participant-owned and project-native edit authority and lifecycle restrictions remain correct;
-- deletion/retraction/access behavior does not leak historical compression;
-- both document UIs expose Agent compression, the canonical copyable prompt, and truthful version/freshness state;
-- copied prompt matches `compression-prompt-v1` exactly;
-- 2,000-character limit remains enforced;
-- authorized agent/document responses expose alignment additively without widening access.
+- canonical new-save prompt version is `compression-prompt-v2`;
+- the v2 prompt exactly matches the durable contract and contains the 2,000-character instruction;
+- existing v1 compression provenance is not rewritten;
+- copied participant-owned payload contains the canonical v2 instructions, current title, and current full body;
+- copied project-native payload contains the same canonical v2 instructions, current title, and current full body;
+- both UI paths share the canonical prompt implementation rather than duplicating prompt text;
+- copy behavior performs no document mutation or model/network request;
+- both editors visibly communicate the 2,000-character maximum;
+- both editors expose a live counter initialized from existing text and updated on input;
+- the existing 2,000-character save validation remains enforced;
+- existing compression lifecycle/concurrency tests continue to pass.
 
 Run the repository-required validation from `AGENTS.md`, including at minimum:
 
@@ -119,22 +112,21 @@ If the environment again cannot execute Vitest or install dependencies because o
 
 ## Documentation
 
-`docs/DOCUMENT_LIFECYCLE.md` is the durable source of truth for compression revision semantics and the canonical manual-generation prompt. Keep it aligned if implementation forces a concrete field/endpoint detail to be settled.
+`docs/DOCUMENT_LIFECYCLE.md` has already been updated with the durable v2 contract. Keep implementation aligned with it. Do not create a second architectural document for this bounded follow-up.
 
-Update implementation/status documentation as appropriate after implementation. Do not duplicate the durable lifecycle contract into another design document.
+Only amend durable documentation further if implementation reveals a real contract issue that must be settled; do not rewrite it merely to narrate code changes.
 
 ## Explicit non-goals
 
 Do not implement:
 
 - automatic or Loom-hosted LLM compression generation;
-- sending document content to an external model;
+- automatic transmission of document content to an external model/provider;
+- model selection or verified model provenance;
 - GPT Action project/document reads;
 - agent document/compression writes;
 - compression restoration/revert UI;
-- multiple competing selected compression candidates or ranking;
-- a general derived-artifact framework;
-- verified external model identity/provenance;
-- unrelated permission, lifecycle, authentication, or UI redesigns.
+- multiple competing compression candidates, ranking, or orchestration;
+- unrelated permission, lifecycle, authentication, schema, or UI redesigns.
 
-Implement this slice completely and narrowly. The intended next architectural benefit is that future agents can use a small, explicitly version-aligned compression to decide whether expensive full-document retrieval is necessary, rather than recreating giant-document retrieval by default.
+Implement this follow-up completely and narrowly.
