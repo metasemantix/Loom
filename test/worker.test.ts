@@ -699,7 +699,7 @@ describe("read-only machine access",()=>{
     const canonical=await SELF.fetch(`${origin}/api/agent/me`,{headers:{authorization:`Bearer ${token}`}}).then(r=>r.json<any>());
     const accepted=await handoff(token);expect(accepted.status).toBe(200);expect(accepted.headers.get("cache-control")).toBe("no-store");expect(await accepted.json()).toEqual(canonical);
     for(const credential of ["malformed",`loom_agent_${"0".repeat(36)}`]){const denied=await handoff(credential);expect(denied.status).toBe(401);expect(denied.headers.get("cache-control")).toBe("no-store");expect(await denied.text()).not.toContain(String(credential))}
-    const malformedJson=await SELF.fetch(`${origin}/api/gpt-action/authenticate`,{method:"POST",headers:{"content-type":"application/json"},body:"{"});expect(malformedJson.status).toBe(400);expect(malformedJson.headers.get("cache-control")).toBe("no-store");
+    const malformedJson=await SELF.fetch(`${origin}/api/gpt-action/authenticate`,{method:"POST",headers:{"content-type":"application/json"},body:'{"credential":"loom_agent_secret'});expect(malformedJson.status).toBe(400);expect(malformedJson.headers.get("cache-control")).toBe("no-store");expect(await malformedJson.json()).toEqual({error:{code:"invalid_request",message:"Malformed JSON request"}});
     const unsupported=await SELF.fetch(`${origin}/api/gpt-action/authenticate`,{method:"GET",headers:{authorization:`Bearer ${token}`}});expect(unsupported.status).toBe(405);expect(unsupported.headers.get("cache-control")).toBe("no-store");
 
     await SELF.fetch(`${origin}/api/projects/${projectId}/archive`,{method:"POST",headers:{cookie:owner.cookie,origin}});expect((await handoff(token)).status).toBe(200);
@@ -708,7 +708,7 @@ describe("read-only machine access",()=>{
     await SELF.fetch(`${origin}/api/projects/${projectId}/agent-credentials/${created.credential.id}`,{method:"DELETE",headers:{cookie:owner.cookie,origin}});expect((await handoff(token)).status).toBe(401);
 
     const audits=(await env.DB.prepare("SELECT operation,result_code FROM machine_read_audit ORDER BY occurred_at,id").all()).results;expect(JSON.stringify(audits)).not.toContain(token);
-    const schemaResponse=await SELF.fetch(`${origin}/openapi/gpt-action.json`),schema=await schemaResponse.json<any>();expect(schemaResponse.status).toBe(200);expect(schema.openapi).toBe("3.1.0");expect(Object.keys(schema.paths)).toEqual(["/api/gpt-action/authenticate"]);expect(Object.keys(schema.paths["/api/gpt-action/authenticate"])).toEqual(["post"]);expect(schema.paths["/api/gpt-action/authenticate"].post.operationId).toBe("authenticateLoomCredential");expect(JSON.stringify(schema).match(/operationId/g)).toHaveLength(1);expect(JSON.stringify(schema)).not.toContain(token);
+    const schemaResponse=await SELF.fetch(`${origin}/openapi/gpt-action.json`),schema=await schemaResponse.json<any>();expect(schemaResponse.status).toBe(200);expect(schema.openapi).toBe("3.1.0");expect(schema.servers).toEqual([{url:"https://loom.metasemantix.workers.dev"}]);expect(Object.keys(schema.paths)).toEqual(["/api/gpt-action/authenticate"]);expect(Object.keys(schema.paths["/api/gpt-action/authenticate"])).toEqual(["post"]);expect(schema.paths["/api/gpt-action/authenticate"].post.operationId).toBe("authenticateLoomCredential");expect(JSON.stringify(schema).match(/operationId/g)).toHaveLength(1);expect(JSON.stringify(schema)).not.toContain(token);
   });
 
   it("publishes non-secret discovery and a parseable unauthenticated workbench",async()=>{

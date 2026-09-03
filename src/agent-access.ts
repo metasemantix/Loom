@@ -83,7 +83,7 @@ export async function checkIn(request:Request,env:Env){
 export async function authenticateGptAction(request:Request,env:Env){
   const noStore=(response:Response)=>{response.headers.set("cache-control","no-store");return response};
   if(request.method!=="POST")return noStore(problem(405,"method_not_allowed","Credential handoff requires POST"));
-  let body:Record<string,unknown>;try{body=await readJson(request)}catch(error){return noStore(problem(400,"invalid_request",(error as Error).message))}
+  let body:Record<string,unknown>;try{body=await readJson(request)}catch{return noStore(problem(400,"invalid_request","Malformed JSON request"))}
   if(typeof body.credential!=="string"||Object.keys(body).some(key=>key!=="credential"))return noStore(problem(400,"invalid_request","The request must contain only a string credential"));
   const auth=await authenticateCredential(body.credential,env,"introspect",null);if(auth.response)return noStore(auth.response);
   const c=auth.credential!;await audit(env,c.id,c.project_id,"introspect",null,true,"allowed");

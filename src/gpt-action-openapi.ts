@@ -5,6 +5,7 @@ export const gptActionOpenApi = {
     version: "1.0.0",
     description: "Recognize a conversation-supplied Loom project credential without creating a session.",
   },
+  servers: [{ url: "https://loom.metasemantix.workers.dev" }],
   paths: {
     "/api/gpt-action/authenticate": {
       post: {
