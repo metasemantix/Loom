@@ -3,11 +3,25 @@ import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deleteProjectDocument } from "../../src/project-documents";
 import { finalizeDueAccounts } from "../../src/accounts";
-import { acceptanceCase, actor, agentRequest, AT, coveredCases, expectStatus, ids, NOW, origin, request, resetReferenceWorld } from "./harness";
+import { acceptanceCase, actor, agentRequest, agentTokens, AT, coveredCases, expectStatus, ids, NOW, origin, request, resetReferenceWorld } from "./harness";
 import { caseName, operationBranches } from "./catalog";
 
 beforeEach(resetReferenceWorld);
 const json={"content-type":"application/json"};
+const gptAction=(credential:unknown,init:RequestInit={})=>SELF.fetch(origin+"/api/gpt-action/authenticate",{method:"POST",headers:json,body:JSON.stringify({credential}),...init});
+
+describe("deterministic acceptance: GPT Action credential handoff",()=>{
+  acceptanceCase(caseName("gpt-action.authenticate","active.allowed-and-equivalent"),async()=>{const canonical=await agentRequest("/api/agent/me","readOnly").then(r=>r.json()),action=await gptAction(agentTokens.readOnly);expectStatus(action,200);expect(action.headers.get("cache-control")).toBe("no-store");expect(await action.json()).toEqual(canonical)});
+  acceptanceCase(caseName("gpt-action.authenticate","malformed.denied"),async()=>{expectStatus(await gptAction("not-a-token"),401)});
+  acceptanceCase(caseName("gpt-action.authenticate","unknown.denied"),async()=>{expectStatus(await gptAction(`loom_agent_${"0".repeat(36)}`),401)});
+  acceptanceCase(caseName("gpt-action.authenticate","revoked.denied"),async()=>{expectStatus(await gptAction(agentTokens.revoked),401)});
+  acceptanceCase(caseName("gpt-action.authenticate","archived.allowed"),async()=>{expectStatus(await gptAction(agentTokens.archived),200)});
+  acceptanceCase(caseName("gpt-action.authenticate","deletion-scheduled.allowed"),async()=>{await env.DB.prepare("UPDATE projects SET lifecycle_state='archived',deletion_due_at=? WHERE id=?").bind("2099-01-01T00:00:00.000Z",ids.projects.active).run();expectStatus(await gptAction(agentTokens.readOnly),200)});
+  acceptanceCase(caseName("gpt-action.authenticate","shell.denied"),async()=>{await env.DB.prepare("UPDATE projects SET lifecycle_state='shell' WHERE id=?").bind(ids.projects.active).run();expectStatus(await gptAction(agentTokens.readOnly),410)});
+  acceptanceCase(caseName("gpt-action.authenticate","unsupported-method.denied"),async()=>{expectStatus(await SELF.fetch(origin+"/api/gpt-action/authenticate",{method:"GET",headers:{authorization:`Bearer ${agentTokens.readOnly}`}}),405)});
+  acceptanceCase(caseName("gpt-action.authenticate","credential-not-disclosed"),async()=>{const response=await gptAction(agentTokens.readOnly);expect(JSON.stringify(await response.json())).not.toContain(agentTokens.readOnly);expect(JSON.stringify((await env.DB.prepare("SELECT * FROM machine_read_audit").all()).results)).not.toContain(agentTokens.readOnly)});
+  acceptanceCase(caseName("gpt-action.authenticate","schema.single-operation"),async()=>{const schema=await SELF.fetch(origin+"/openapi/gpt-action.json").then(r=>r.json<any>());expect(schema.servers).toEqual([{url:"https://loom.metasemantix.workers.dev"}]);expect(Object.keys(schema.paths)).toEqual(["/api/gpt-action/authenticate"]);expect(Object.keys(schema.paths["/api/gpt-action/authenticate"])).toEqual(["post"]);expect(schema.paths["/api/gpt-action/authenticate"].post.operationId).toBe("authenticateLoomCredential")});
+});
 
 describe("deterministic acceptance: native agent entrance and check-in",()=>{
   acceptanceCase(caseName("agent.discovery","llms.public"),async()=>{const response=await SELF.fetch(origin+"/llms.txt"),text=await response.text();expectStatus(response,200);expect(response.headers.get("content-type")).toContain("text/plain");expect(text).toContain("/agent");expect(text).toContain("/.well-known/loom-agent")});

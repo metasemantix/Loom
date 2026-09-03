@@ -12,7 +12,8 @@ import { createProjectDocument, deleteProjectDocument, listCreatorEntitlements, 
 import { exportProject } from "./export";
 import { cancelProjectDeletion, scheduleProjectDeletion } from "./project-deletion";
 import { devAuthEnabled, establishDevSession, markDevAuth } from "./dev-auth";
-import { checkIn, createCredential, listCredentials, machineRead, revokeCredential } from "./agent-access";
+import { authenticateGptAction, checkIn, createCredential, listCredentials, machineRead, revokeCredential } from "./agent-access";
+import { gptActionOpenApi } from "./gpt-action-openapi";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -82,6 +83,8 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url), path = url.pathname;
     if(request.method==="GET"&&path==="/llms.txt")return new Response("# Loom\n\nLoom is a participant-owned document and project service.\nHumans authenticate with Discord at /login.\nMachine callers start at /agent and use opaque bearer credentials in the Authorization header.\nStrict discovery: /.well-known/loom-agent\n",{headers:{"content-type":"text/plain; charset=utf-8","cache-control":"public, max-age=3600"}});
     if(request.method==="GET"&&path==="/.well-known/loom-agent")return json({service:"Loom",protocolVersion:"1",entrance:"/agent",authentication:{scheme:"Bearer",transport:"Authorization header"},endpoints:{introspection:"/api/agent/me",project:"/api/agent/project",documents:"/api/agent/documents",document:"/api/agent/documents/{document_id}",checkin:"/api/agent/check-in"},orientation:"/llms.txt"});
+    if(request.method==="GET"&&path==="/openapi/gpt-action.json")return json(gptActionOpenApi,200,{"cache-control":"public, max-age=3600"});
+    if(path==="/api/gpt-action/authenticate")return authenticateGptAction(request,env);
     if(request.method==="GET"&&path==="/agent")return agentPage();
     if (path === "/api/agent/me") return machineRead(request,env,"introspect");
     if (path === "/api/agent/project") return machineRead(request,env,"project");

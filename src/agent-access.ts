@@ -35,20 +35,28 @@ export async function revokeCredential(env:Env,p:Principal,projectId:string,id:s
   return new Response(null,{status:204});
 }
 
-async function authenticate(request:Request,env:Env,operation:string,target:string|null):Promise<{credential:Credential|null;response:Response|null}>{
-  const authorization=request.headers.get("authorization")??"",match=/^Bearer ([^\s]+)$/.exec(authorization);
-  if(!match||!TOKEN_PATTERN.test(match[1])){await audit(env,null,null,operation,target,false,"invalid_bearer_token");return {credential:null,response:problem(401,"invalid_bearer_token","A valid bearer credential is required")}}
-  const hash=await hashSecret(match[1]);const credential=await env.DB.prepare(`SELECT c.id,c.project_id,c.authorized_by_participant_id,c.label,c.fingerprint,c.created_at,c.revoked_at,c.checkin_enabled,x.name,x.description,x.read_audience,x.lifecycle_state,x.deletion_due_at FROM project_machine_credentials c JOIN projects x ON x.id=c.project_id WHERE c.token_hash=?`).bind(hash).first<Credential>();
+async function authenticateCredential(token:string|null,env:Env,operation:string,target:string|null):Promise<{credential:Credential|null;response:Response|null}>{
+  if(!token||!TOKEN_PATTERN.test(token)){await audit(env,null,null,operation,target,false,"invalid_bearer_token");return {credential:null,response:problem(401,"invalid_bearer_token","A valid bearer credential is required")}}
+  const hash=await hashSecret(token);const credential=await env.DB.prepare(`SELECT c.id,c.project_id,c.authorized_by_participant_id,c.label,c.fingerprint,c.created_at,c.revoked_at,c.checkin_enabled,x.name,x.description,x.read_audience,x.lifecycle_state,x.deletion_due_at FROM project_machine_credentials c JOIN projects x ON x.id=c.project_id WHERE c.token_hash=?`).bind(hash).first<Credential>();
   if(!credential||credential.revoked_at){await audit(env,credential?.id??null,credential?.project_id??null,operation,target,false,credential?.revoked_at?"credential_revoked":"invalid_bearer_token");return {credential:null,response:problem(401,"invalid_bearer_token","A valid bearer credential is required")}}
   const now=new Date().toISOString();
   if(credential.lifecycle_state==="shell"||(credential.deletion_due_at!==null&&credential.deletion_due_at<=now)){await audit(env,credential.id,credential.project_id,operation,target,false,"project_unavailable");return {credential:null,response:problem(410,"project_unavailable","The project no longer provides a readable corpus")}}
   return {credential,response:null};
 }
 
+function bearerToken(request:Request):string|null{
+  const match=/^Bearer ([^\s]+)$/.exec(request.headers.get("authorization")??"");
+  return match?.[1]??null;
+}
+
+function introspection(c:Credential){
+  return {caller:{authentication:"bearer",credential:{id:c.id,label:c.label,fingerprint:c.fingerprint,createdAt:c.created_at},grant:{projectId:c.project_id,capabilities:[...readCapabilities,...(c.checkin_enabled&&c.lifecycle_state==="active"&&c.deletion_due_at===null?["agent_checkin:write"]:[])]}}};
+}
+
 export async function machineRead(request:Request,env:Env,operation:"introspect"|"project"|"documents"|"document",target:string|null=null){
-  const auth=await authenticate(request,env,operation,target);if(auth.response)return auth.response;const c=auth.credential!;
+  const auth=await authenticateCredential(bearerToken(request),env,operation,target);if(auth.response)return auth.response;const c=auth.credential!;
   if(request.method!=="GET"){await audit(env,c.id,c.project_id,operation,target,false,"read_only_api");return problem(405,"read_only_api","Machine access is read-only")}
-  if(operation==="introspect"){await audit(env,c.id,c.project_id,operation,null,true,"allowed");return json({caller:{authentication:"bearer",credential:{id:c.id,label:c.label,fingerprint:c.fingerprint,createdAt:c.created_at},grant:{projectId:c.project_id,capabilities:[...readCapabilities,...(c.checkin_enabled&&c.lifecycle_state==="active"&&c.deletion_due_at===null?["agent_checkin:write"]:[])]}}})}
+  if(operation==="introspect"){await audit(env,c.id,c.project_id,operation,null,true,"allowed");return json(introspection(c))}
   if(operation==="project"){await audit(env,c.id,c.project_id,operation,null,true,"allowed");return json({project:{id:c.project_id,name:c.name,description:c.description,readAudience:c.read_audience,status:c.lifecycle_state,deletionScheduled:c.deletion_due_at!==null},links:{documents:"/api/agent/documents"}})}
   if(operation==="documents"){
     const contributions=await env.DB.prepare(`SELECT pd.document_id id,CASE WHEN pd.state='active' AND d.id IS NOT NULL AND NOT(q.account_state='deletion_pending' AND q.deletion_due_at<=?) THEN 'available' ELSE 'unavailable' END availability,CASE WHEN pd.state='active' THEN d.title ELSE pd.tombstone_title END title,CASE WHEN pd.state='active' AND d.id IS NOT NULL THEN d.logical_path END logical_path,'participant' ownership_kind,'document' document_kind,pd.source_owner_participant_id owner_id,pd.added_at created_at,CASE WHEN pd.state='active' AND d.id IS NOT NULL AND NOT(q.account_state='deletion_pending' AND q.deletion_due_at<=?) THEN v.created_at END updated_at,CASE WHEN pd.state='active' AND d.id IS NOT NULL AND NOT(q.account_state='deletion_pending' AND q.deletion_due_at<=?) THEN d.compression END compression,CASE WHEN pd.state='active' AND d.id IS NOT NULL AND NOT(q.account_state='deletion_pending' AND q.deletion_due_at<=?) THEN '/api/agent/documents/'||pd.document_id END retrieval FROM project_documents pd LEFT JOIN documents d ON d.id=pd.document_id AND d.owner_type='participant' AND d.owner_id=pd.source_owner_participant_id AND d.deleted_at IS NULL LEFT JOIN participants q ON q.id=pd.source_owner_participant_id LEFT JOIN document_versions v ON v.id=d.current_version_id WHERE pd.project_id=?`).bind(new Date().toISOString(),new Date().toISOString(),new Date().toISOString(),new Date().toISOString(),c.project_id).all();
@@ -61,7 +69,7 @@ export async function machineRead(request:Request,env:Env,operation:"introspect"
 }
 
 export async function checkIn(request:Request,env:Env){
-  const auth=await authenticate(request,env,"agent_checkin",null);if(auth.response)return auth.response;const c=auth.credential!;
+  const auth=await authenticateCredential(bearerToken(request),env,"agent_checkin",null);if(auth.response)return auth.response;const c=auth.credential!;
   if(request.method!=="POST")return problem(405,"method_not_allowed","Check-in requires POST");
   let body:Record<string,unknown>;try{body=await readJson(request)}catch(error){return problem(400,"invalid_request",(error as Error).message)}
   if(typeof body.value!=="string"||!body.value.trim()||body.value.length>CHECKIN_LIMIT)return problem(400,"invalid_request",`value must contain 1 to ${CHECKIN_LIMIT} characters`);
@@ -70,4 +78,14 @@ export async function checkIn(request:Request,env:Env){
   if(!result.meta.changes){await audit(env,c.id,c.project_id,"agent_checkin",null,false,"capability_or_project_unavailable");return problem(403,"capability_unavailable","The credential does not currently have check-in authority")}
   await audit(env,c.id,c.project_id,"agent_checkin",null,true,"allowed");
   return json({checkin:{id,projectId:c.project_id,credentialId:c.id,value:submitted,createdAt:now}},201);
+}
+
+export async function authenticateGptAction(request:Request,env:Env){
+  const noStore=(response:Response)=>{response.headers.set("cache-control","no-store");return response};
+  if(request.method!=="POST")return noStore(problem(405,"method_not_allowed","Credential handoff requires POST"));
+  let body:Record<string,unknown>;try{body=await readJson(request)}catch{return noStore(problem(400,"invalid_request","Malformed JSON request"))}
+  if(typeof body.credential!=="string"||Object.keys(body).some(key=>key!=="credential"))return noStore(problem(400,"invalid_request","The request must contain only a string credential"));
+  const auth=await authenticateCredential(body.credential,env,"introspect",null);if(auth.response)return noStore(auth.response);
+  const c=auth.credential!;await audit(env,c.id,c.project_id,"introspect",null,true,"allowed");
+  return noStore(json(introspection(c)));
 }
