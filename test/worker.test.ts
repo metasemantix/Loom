@@ -3,6 +3,7 @@ import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { DEV_PARTICIPANT_ID, DEV_USER_ID } from "../src/dev-auth";
+import { COMPRESSION_PROMPT, COMPRESSION_PROMPT_VERSION, compressionRequest } from "../src/compression";
 
 const origin = "http://example.com";
 
@@ -767,7 +768,8 @@ describe("read-only machine access",()=>{
     const alice=await participant("compression"),documentId=await create(alice.cookie);
     const first=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>()),source=first.document.current_version_id;
     const save=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:first.document.title,logicalPath:first.document.logical_path,visibility:first.document.visibility,compression:"Bound semantic text",sourceVersionId:source})});expect(save.status).toBe(200);
-    expect((await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document).toMatchObject({compression:"Bound semantic text",compression_source_version_id:source,compression_freshness:"current"});
+    expect((await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document).toMatchObject({compression:"Bound semantic text",compression_source_version_id:source,compression_freshness:"current",compression_prompt_version:"compression-prompt-v2"});
+    await env.DB.prepare("UPDATE compression_revisions SET prompt_version='compression-prompt-v1' WHERE document_id=?").bind(documentId).run();
     await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Metadata only",logicalPath:first.document.logical_path,visibility:first.document.visibility})});
     expect((await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document.compression_freshness).toBe("current");
     await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({content:"new full text",contentType:"text/markdown"})});
@@ -775,7 +777,38 @@ describe("read-only machine access",()=>{
     const conflict=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Must not commit",logicalPath:"must-not-commit.md",visibility:"public",compression:"wrong binding",sourceVersionId:source})});expect(conflict.status).toBe(409);
     const afterConflict=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(afterConflict.document).toMatchObject({title:stale.document.title,logical_path:stale.document.logical_path,visibility:stale.document.visibility,compression:"Bound semantic text",compression_freshness:"stale"});
     const refreshed=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:stale.document.title,logicalPath:stale.document.logical_path,visibility:stale.document.visibility,compression:"Fresh semantic text",sourceVersionId:stale.document.current_version_id})});expect(refreshed.status).toBe(200);
-    const history=await SELF.fetch(`${origin}/api/me/documents/${documentId}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(history.compressionRevisions).toHaveLength(2);expect(history.compressionRevisions.map((x:any)=>x.text)).toEqual(["Fresh semantic text","Bound semantic text"]);
+    const history=await SELF.fetch(`${origin}/api/me/documents/${documentId}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(history.compressionRevisions).toHaveLength(2);expect(history.compressionRevisions.map((x:any)=>x.text)).toEqual(["Fresh semantic text","Bound semantic text"]);expect(history.compressionRevisions.map((x:any)=>x.prompt_version)).toEqual(["compression-prompt-v2","compression-prompt-v1"]);
+  });
+
+  it("uses the durable v2 compression request and exposes the complete manual workflow in both editors",async()=>{
+    const expected=`Create a concise semantic compression of the document below for an AI agent that must decide whether the full document is relevant.
+
+Preserve:
+- the document’s main subject and purpose;
+- important entities, concepts, decisions, constraints, and unresolved questions;
+- distinctions or caveats that materially affect interpretation.
+
+Do not:
+- add information not present in the document;
+- turn it into a generic summary or prose introduction;
+- omit important limitations merely to make it shorter.
+
+Write compact factual prose intended for retrieval and triage, not for a human-facing abstract.
+
+The compression must not exceed 2,000 characters, including spaces.
+
+Return only the compression text, with no heading, commentary, or explanation.
+
+DOCUMENT TITLE:
+[document title]
+
+DOCUMENT:
+[full document text]`;
+    expect(COMPRESSION_PROMPT_VERSION).toBe("compression-prompt-v2");expect(COMPRESSION_PROMPT).toBe(expected);
+    expect(compressionRequest("Current title","Current full body")).toBe(expected.replace("[document title]","Current title").replace("[full document text]","Current full body"));
+    const alice=await participant("compression_ui"),documentId=await create(alice.cookie);
+    const projectId=await project(alice),nativeResponse=await native(projectId,alice,{title:"Native title",content:"Native full body",contentType:"text/plain"}),nativeId=(await nativeResponse.json<any>()).document.id;
+    for(const path of [`/documents/${documentId}`,`/project-documents/${nativeId}`]){const html=await SELF.fetch(origin+path,{headers:{cookie:alice.cookie}}).then(r=>r.text()),script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1]??"";expect(()=>new Function(script)).not.toThrow();expect(html).toContain("Maximum 2,000 characters, including spaces.");expect(script).toContain("navigator.clipboard.writeText(compressionPrompt.replace('[document title]',d.title).replace('[full document text]',d.content))");expect(script).toContain("addEventListener('input',count)");expect(script).toContain("value.length.toLocaleString()+' / 2,000'");expect(script).not.toContain("fetch("+"compressionPrompt");}
   });
 
 });

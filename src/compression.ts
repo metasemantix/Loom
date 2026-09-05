@@ -1,7 +1,7 @@
 import { opaque } from "./auth";
 import type { Env } from "./types";
 
-export const COMPRESSION_PROMPT_VERSION = "compression-prompt-v1";
+export const COMPRESSION_PROMPT_VERSION = "compression-prompt-v2";
 export const COMPRESSION_PROMPT = `Create a concise semantic compression of the document below for an AI agent that must decide whether the full document is relevant.
 
 Preserve:
@@ -16,10 +16,19 @@ Do not:
 
 Write compact factual prose intended for retrieval and triage, not for a human-facing abstract.
 
+The compression must not exceed 2,000 characters, including spaces.
+
 Return only the compression text, with no heading, commentary, or explanation.
 
+DOCUMENT TITLE:
+[document title]
+
 DOCUMENT:
-[paste full document here]`;
+[full document text]`;
+
+export function compressionRequest(title:string,content:string) {
+  return COMPRESSION_PROMPT.replace("[document title]",title).replace("[full document text]",content);
+}
 
 export function compressionSelect(alias="d") { return `,${alias}.current_version_id,${alias}.selected_compression_revision_id compression_revision_id,cr.source_version_id compression_source_version_id,cr.created_at compression_created_at,cr.actor_type compression_actor_type,cr.actor_id compression_actor_id,CASE WHEN cr.actor_type='human' THEN COALESCE((SELECT display_name FROM users WHERE id=cr.actor_id),(SELECT u.display_name FROM participants p JOIN users u ON u.id=p.user_id WHERE p.id=cr.actor_id),(SELECT provenance_identifier || ' (former user)' FROM participants WHERE id=cr.actor_id)) END compression_actor_display_name,cr.prompt_version compression_prompt_version,sv.version_number compression_source_version_number,CASE WHEN cr.id IS NULL THEN 'missing' WHEN cr.source_version_id IS NULL THEN 'unknown' WHEN cr.source_version_id=${alias}.current_version_id THEN 'current' ELSE 'stale' END compression_freshness`; }
 export function compressionJoins(alias="d") { return ` LEFT JOIN compression_revisions cr ON cr.id=${alias}.selected_compression_revision_id AND cr.document_id=${alias}.id LEFT JOIN document_versions sv ON sv.id=cr.source_version_id AND sv.document_id=${alias}.id`; }
