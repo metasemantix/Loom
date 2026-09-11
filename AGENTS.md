@@ -112,6 +112,8 @@ If the environment cannot run a browser or otherwise perform the smoke test, say
 
 ## Before declaring completion
 
+Pull requests are expected to pass the repository CI workflow, which runs the baseline verification battery below as an independent verification layer. Agents must still run these checks locally when their environment permits it; CI is not a substitute for locally available verification.
+
 Run:
 
 ```text
