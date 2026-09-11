@@ -16,6 +16,12 @@ async function choose(current:Menu,choice:string){return menu(current.links.get(
 async function messageFor(raw:string){
   return env.DB.prepare(`SELECT m.id,m.chain_id,m.value,m.symbol_count,m.completed_at FROM agent_lab_keyboard_messages m JOIN agent_lab_keyboard_capabilities c ON c.message_id=m.id WHERE c.token_hash=?`).bind(await hashSecret(raw)).first<{id:string;chain_id:string;value:string;symbol_count:number;completed_at:string|null}>();
 }
+async function latestOutcome(raw:string){
+  return env.DB.prepare(`SELECT e.outcome FROM agent_lab_keyboard_events e JOIN agent_lab_keyboard_capabilities c ON c.id=e.capability_id WHERE c.token_hash=? ORDER BY e.created_at DESC,e.rowid DESC LIMIT 1`).bind(await hashSecret(raw)).first<{outcome:string}>();
+}
+async function capabilityCount(raw:string){
+  return env.DB.prepare(`SELECT count(*) count FROM agent_lab_keyboard_capabilities WHERE chain_id=(SELECT chain_id FROM agent_lab_keyboard_capabilities WHERE token_hash=?)`).bind(await hashSecret(raw)).first<{count:number}>();
+}
 
 describe("verbatim-link compositional keyboard",()=>{
   it("enters with a fresh empty persisted message and one deterministic 28-link menu",async()=>{
@@ -45,10 +51,21 @@ describe("verbatim-link compositional keyboard",()=>{
     expect((await env.DB.prepare(`SELECT count(*) count FROM agent_lab_keyboard_capabilities WHERE chain_id=? AND expected_operation='choose'`).bind(raced!.chain_id).first<{count:number}>())?.count).toBe(2);
   });
 
-  it("appends one ASCII space and leaves a capability usable after an invalid choice",async()=>{
-    const start=await menu(),invalid=new URL(start.links.get("a")!);invalid.searchParams.set("choice","A");
-    expect((await get(invalid.toString())).status).toBe(403);
-    const spaced=await choose(start,"space");expect(spaced.value).toBe(" ");expect((await messageFor(cap(spaced)))?.symbol_count).toBe(1);
+  it("classifies invalid choices by capability state without consuming or issuing successors",async()=>{
+    const invalidRequest=async(current:Menu)=>{const invalid=new URL(current.links.get("a")!);invalid.searchParams.set("choice","A");const response=await get(invalid.toString());expect(response.status).toBe(403);expect(await response.text()).toBe("Capability rejected.\n")};
+
+    const live=await menu(),liveRaw=cap(live);await invalidRequest(live);
+    expect((await latestOutcome(liveRaw))?.outcome).toBe("invalid_choice");expect((await capabilityCount(liveRaw))?.count).toBe(1);
+    const spaced=await choose(live,"space");expect(spaced.value).toBe(" ");expect((await messageFor(cap(spaced)))?.symbol_count).toBe(1);
+
+    const consumed=await menu(),consumedRaw=cap(consumed);await choose(consumed,"a");const consumedCount=(await capabilityCount(consumedRaw))?.count;await invalidRequest(consumed);
+    expect((await latestOutcome(consumedRaw))?.outcome).toBe("replayed");expect((await capabilityCount(consumedRaw))?.count).toBe(consumedCount);
+
+    const expired=await menu(),expiredRaw=cap(expired);await env.DB.prepare(`UPDATE agent_lab_keyboard_capabilities SET expires_at='2000-01-01T00:00:00.000Z' WHERE token_hash=?`).bind(await hashSecret(expiredRaw)).run();await invalidRequest(expired);
+    expect((await latestOutcome(expiredRaw))?.outcome).toBe("expired");expect((await capabilityCount(expiredRaw))?.count).toBe(1);
+
+    const completed=await menu(),chooseRaw=cap(completed),done=await get(completed.links.get("done")!),readUrl=(await done.text()).match(/^read: (\S+)$/m)![1],readRaw=new URL(readUrl).searchParams.get("cap")!,invalidRead=new URL(completed.links.get("a")!);invalidRead.searchParams.set("cap",readRaw);invalidRead.searchParams.set("choice","A");const beforeReadReject=(await capabilityCount(chooseRaw))?.count;
+    expect((await get(invalidRead.toString())).status).toBe(403);expect((await latestOutcome(readRaw))?.outcome).toBe("wrong_operation");expect((await capabilityCount(readRaw))?.count).toBe(beforeReadReject);
   });
 
   it("rejects symbol 129 without consumption while allowing done from the same menu",async()=>{

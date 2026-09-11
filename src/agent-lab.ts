@@ -87,10 +87,10 @@ function keyboardMenu(request:Request,value:string,capability:string):Response {
   return text(`value:\n${value}\n\n${choices}\n`);
 }
 
-async function rejectKeyboard(env:Env,operation:KeyboardOperation,raw:string|null,messageId?:string,outcomeOverride?:string):Promise<Response> {
+async function rejectKeyboard(env:Env,operation:KeyboardOperation,raw:string|null,messageId?:string,validCapabilityOutcome?:string):Promise<Response> {
   const at=new Date().toISOString();
-  let row:KeyboardCapabilityRow|null=null,outcome=outcomeOverride??"malformed";
-  if(!outcomeOverride&&raw&&keyboardCapabilityPattern.test(raw)){
+  let row:KeyboardCapabilityRow|null=null,outcome="malformed";
+  if(raw&&keyboardCapabilityPattern.test(raw)){
     row=await env.DB.prepare(`SELECT c.id,c.chain_id,c.message_id,c.expected_operation,c.expires_at,c.consumed_at,m.symbol_count,m.completed_at FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.token_hash=?`).bind(await hashSecret(raw)).first<KeyboardCapabilityRow>();
     if(!row)outcome="unknown";
     else if(row.expected_operation!==operation)outcome="wrong_operation";
@@ -98,10 +98,9 @@ async function rejectKeyboard(env:Env,operation:KeyboardOperation,raw:string|nul
     else if(row.expires_at<=at)outcome="expired";
     else if(messageId!==undefined&&row.message_id!==messageId)outcome="wrong_chain";
     else if(row.completed_at)outcome="wrong_state";
+    else if(validCapabilityOutcome)outcome=validCapabilityOutcome;
     else if(operation==="choose"&&row.symbol_count===128)outcome="length_limit";
     else outcome="wrong_state";
-  } else if(raw&&keyboardCapabilityPattern.test(raw)) {
-    row=await env.DB.prepare(`SELECT c.id,c.chain_id,c.message_id,c.expected_operation,c.expires_at,c.consumed_at,m.symbol_count,m.completed_at FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.token_hash=?`).bind(await hashSecret(raw)).first<KeyboardCapabilityRow>();
   }
   await env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) VALUES(?,?,?,?,?,?,?,?)`)
     .bind(opaque("ake"),row?.chain_id??null,messageId??row?.message_id??null,row?.id??null,operation,outcome,row?.symbol_count??null,at).run();
