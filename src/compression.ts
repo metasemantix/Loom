@@ -4,7 +4,8 @@ import type { Env } from "./types";
 export const COMPRESSION_PROMPT_VERSION = "compression-prompt-v3";
 export const COMPRESSION_FORMAT = "structured-v3";
 export const COMPRESSION_SCHEMA_VERSION = 1;
-export const COMPRESSION_MAX_CHARACTERS = 2000;
+export const COMPRESSION_GENERATION_TARGET_CHARACTERS = 4000;
+export const COMPRESSION_MAX_CHARACTERS = 8000;
 export const DOCUMENT_KINDS = ["design_spec","idea_collection","meeting","incident_report","reference","general"] as const;
 
 export const COMPRESSION_PROMPT = `Create a structured semantic projection of the document below for an AI agent deciding whether to retrieve the full document.
@@ -24,7 +25,9 @@ Use a document-sensitive contents payload:
 
 Keep gist compact and retrieval-oriented. Topics and all contents must be grounded in the source. Compression describes what the source contains: do not add source-external inference, downstream synthesis, judgment, cross-document reasoning, mechanisms, reusable patterns, or other derived cognition.
 
-The complete JSON, including spaces, must not exceed 2,000 characters.
+Prefer the smallest complete semantic projection. Most documents should fit within 4,000 characters; aim for 4,000 characters or fewer, and do not add detail merely because additional space is available. Compression is a retrieval-oriented projection, not a substitute for the full document.
+
+When necessary to preserve independently meaningful items, important distinctions, or source-grounded structure, the projection may exceed that preferred target. The absolute maximum is 8,000 characters, including the complete JSON envelope. Never meet the 4,000-character target by truncating JSON, dropping required structure, collapsing independently meaningful idea_collection items into generic prose, or omitting distinctions that materially affect retrieval.
 
 DOCUMENT TITLE:
 [document title]
@@ -42,7 +45,7 @@ export function compressionRequest(title:string,content:string,sourceRevisionId:
 type Projection={schema_version:number;source_revision:string;document_kind:string;gist:string;topics:string[];contents:Record<string,unknown>};
 export function validateCompression(value:unknown, sourceVersionId:unknown):{text:string;artifact:Projection}|{error:string}{
   if(typeof value!=="string")return {error:"compression must be a JSON string"};
-  if(value.length>COMPRESSION_MAX_CHARACTERS)return {error:"compression must be null or no more than 2,000 characters"};
+  if(value.length>COMPRESSION_MAX_CHARACTERS)return {error:"compression must be null or no more than 8,000 characters"};
   let artifact:unknown;try{artifact=JSON.parse(value)}catch{return {error:"compression must be valid JSON"}}
   if(!artifact||typeof artifact!=="object"||Array.isArray(artifact))return {error:"compression must be a JSON object"};
   const a=artifact as Record<string,unknown>;

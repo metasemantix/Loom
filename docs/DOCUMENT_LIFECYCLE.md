@@ -182,7 +182,7 @@ Use the operation/state model in [TESTING_MODEL.md](./TESTING_MODEL.md). Compres
 - permitted editors only, including archive/retraction/account/deletion restrictions;
 - legacy migration without fabricated provenance/source/timestamps;
 - authorized agent responses exposing alignment without widening disclosure;
-- server-side/input enforcement of the 2,000-character maximum.
+- server-side/input enforcement of the current v3 8,000-character absolute maximum, with 4,000 characters retained as generation guidance rather than a save-time rejection threshold.
 
 Historical v2 compatibility and the current v3 workflow require tests or equivalent focused coverage proving:
 
@@ -192,10 +192,12 @@ Historical v2 compatibility and the current v3 workflow require tests or equival
 - new saves record `compression-prompt-v3`;
 - current participant-owned and project-native copy behavior use the same canonical v3 implementation with title, source revision ID, and full text;
 - copying performs no network/model request and does not mutate the document;
-- the UI visibly states the limit and updates a live `N / 2,000` character count;
-- saving still enforces the 2,000-character limit independently of prompt compliance.
+- the current v3 UI distinguishes the preferred 4,000-character generation target from the absolute limit and updates a live `N / 8,000` character count;
+- current v3 saves enforce the 8,000-character maximum independently of prompt compliance, while allowing semantically necessary projections above the soft target.
 
 Automatic model calls, agent document writes, new GPT Action document reads, compression restoration, competing compression candidates, ranking/orchestration, and verified external-model provenance remain outside this contract.
 ## Structured compression v3
 
 [`COMPRESSION.md`](./COMPRESSION.md) is authoritative for the canonical structured v3 artifact, its document-sensitive taxonomy, validation, machine representation, and current manual-generation workflow. The prose v1/v2 templates above are retained only to document historical prompt provenance and readable historical revisions; new manual saves use `compression-prompt-v3`. All source binding, freshness, immutable-history, authorization, and deletion rules in this document continue to apply unchanged.
+
+For current v3 artifacts, 4,000 characters is the preferred generation target and 8,000 characters (including the complete JSON envelope) is the hard storage and validation maximum. The extra headroom preserves meaningful structured content when necessary; it does not make compression a substitute for the full document. Historical v1/v2 prompt wording above remains unchanged.
