@@ -1,133 +1,160 @@
 # Current Codex Task
 
-Implement Slice 1 of Loom's isolated experimental GET capability chain.
+Implement Slice 2, the recursive verbatim-link hop probe defined in `docs/AGENT_GET_CAPABILITY_EXPERIMENT.md`.
 
-Read and follow `AGENTS.md`, `docs/TESTING_MODEL.md`, and the normative experiment specification in `docs/AGENT_GET_CAPABILITY_EXPERIMENT.md`. Also read `docs/AGENT_ACCESS.md` to preserve the boundary between this experiment and Loom's ordinary authenticated machine access.
+Read and follow `AGENTS.md`, `docs/TESTING_MODEL.md`, `docs/AGENT_GET_CAPABILITY_EXPERIMENT.md`, and `docs/AGENT_ACCESS.md`. Treat the current repository as source of truth and preserve the already deployed Slice 1 `/agent-lab/enter -> write -> read` behavior.
 
 ## Goal
 
-Build the smallest deployable `/agent-lab` surface needed to test one empirical question: when an external constrained agent is explicitly given an entrance URL, can it follow GET-shaped affordances to create persistent state and retrieve the exact same state later?
+Answer one narrow empirical prerequisite before implementing any hyperlink keyboard or compositional writing mechanism:
 
-This is deliberately an experiment, not a new general Loom API pattern.
+Can an ordinary retrieval-oriented agent recursively follow a newly generated URL when every next URL appears verbatim and completely in the immediately preceding response?
+
+Build the smallest deployable hop chain needed to test that question.
 
 ## Current relevant behavior
 
-- Loom's ordinary machine access uses authenticated project-scoped credentials and remains governed by `docs/AGENT_ACCESS.md`.
-- Normal application routing resolves browser/machine principals for protected Loom behavior.
-- No `/agent-lab` capability-chain implementation exists yet.
-- Existing D1 migrations run through `0013_expand_compression_size.sql`; this slice must use migration `0014` unless the repository has changed before implementation begins.
-- CI now runs the baseline repository battery on pull requests and pushes to `main`.
+Verify against the repository before editing:
 
-Verify all of these points against the current repository before editing.
+- Slice 1 is implemented under `/agent-lab` with dedicated D1 tables, hashed single-use capabilities, 24-hour expiry, append-only events, plain-text/no-store responses, and anonymous lab routing isolated from ordinary Loom authorization.
+- `src/agent-lab.ts` currently implements the Slice 1 enter/write/read handlers.
+- migration `0014_agent_get_capability_experiment.sql` created the current lab tables and restricts capability expected operations and event operation values to the Slice 1 taxonomy.
+- ordinary authenticated machine access remains governed by `docs/AGENT_ACCESS.md`.
+- CI runs `npm test`, `npm run typecheck`, and `git diff --check`.
+
+Do not regress Slice 1 while adding Slice 2.
 
 ## Exact implementation scope
 
-### 1. Add isolated lab persistence
+### 1. Add the hop routes
 
-Add migration `migrations/0014_agent_get_capability_experiment.sql` using dedicated experimental tables. Keep lab state separate from participants, projects, ordinary documents, machine credentials, and agent check-ins.
+Implement:
 
-The schema must support:
+- `GET /agent-lab/hop/enter`
+- `GET /agent-lab/hop?cap=<capability>`
 
-- anonymous chains;
-- hashed single-use capabilities bound to a chain and expected operation;
-- persistent scratch entries with stable IDs and deterministic chain-local ordering;
-- append-only experiment events.
+Keep implementation focused in the existing agent-lab module or a very small adjacent experimental module.
 
-Use appropriate foreign keys, uniqueness constraints, and indexes. Scratch entries should use a chain-local `entry_index` with `UNIQUE(chain_id, entry_index)` or an equivalently strong invariant.
+The hop routes must use the same narrowly isolated anonymous routing treatment as existing `/agent-lab` routes and must not weaken authorization elsewhere.
 
-Do not persist raw capabilities. Event rows must not duplicate arbitrary scratch values; record safe identifiers/metadata such as byte count or content hash where useful.
+### 2. Exact hop sequence
 
-### 2. Add the three GET routes
+`/agent-lab/hop/enter` creates a fresh anonymous hop chain and capability A, then returns exactly one absolute directly usable URL:
 
-Implement the protocol exactly as defined in `docs/AGENT_GET_CAPABILITY_EXPERIMENT.md`:
+```text
+next: https://<request-origin>/agent-lab/hop?cap=A
+```
 
-- `GET /agent-lab/enter`
-- `GET /agent-lab/write?cap=A&value=<value>`
-- `GET /agent-lab/read?cap=B&id=<entry-id>`
+Following A must atomically consume A, create B, and return exactly one literal successor URL containing B. Following B does the same for C.
 
-Use a focused module such as `src/agent-lab.ts` rather than mixing experimental persistence logic throughout normal document/project code.
+Following C atomically consumes C and returns the terminal response:
 
-Route the `/agent-lab` surface before ordinary principal/authentication requirements so anonymous callers can use it. This routing exception must be narrowly limited to the explicit lab routes and must not weaken authorization elsewhere.
+```text
+success: pebble-hop-complete
+```
 
-### 3. Plain-text affordances
+A final newline is allowed. The terminal response must contain no `next` URL and must issue no successor capability.
 
-Successful responses must use `text/plain; charset=utf-8` and `Cache-Control: no-store`.
+The required path is therefore exactly:
 
-Return absolute, directly usable next-step URLs. A caller should not need JSON, custom headers, cookies, or knowledge of Loom's internal API conventions to continue the chain.
+```text
+enter -> A -> B -> C -> terminal
+```
 
-The enter response issues A and points directly to the write route. The write response returns the stable entry ID and a directly usable read URL containing B and that entry ID. The read response returns the exact stored value and successor capability C in a directly usable continuation representation.
+A successor must not exist before successful consumption of its predecessor. Do not pre-generate the whole chain at entrance.
 
-Do not add a fourth operation merely to consume C in this slice.
+### 3. Verbatim-link invariant
 
-### 4. Capability contract
+This is the reason the slice exists.
 
-Capabilities must:
+Every nonterminal response must contain exactly one complete, absolute, directly followable `next` URL. The caller must never need to:
 
-- be generated with a cryptographically secure random source;
-- be high entropy and opaque;
-- be stored only as one-way hashes suitable for lookup/verification;
-- be bound to one chain and one expected operation;
-- expire 24 hours after issuance;
-- be successfully consumed at most once;
-- issue a successor only after successful protected action;
-- reject malformed, unknown, expired, replayed, wrong-operation, and wrong-chain use without issuing a successor.
+- append text;
+- replace a placeholder;
+- interpolate a value;
+- copy a token into another URL;
+- construct a query string;
+- submit JSON, a form, custom headers, or cookies.
 
-Capability consumption, protected action, and successor issuance must be atomic enough that concurrent/repeated use cannot create duplicate entries or fork successors. Use D1 transaction/batch semantics or another repository-native atomic pattern that actually preserves this invariant; do not implement a check-then-act race.
+Do not add redirects or alternate transports. We want to know whether a fresh response can itself authorize the next previously unseen literal URL in the external agent environment.
 
-### 5. Scratch payload contract
+### 4. Capability semantics
 
-`value` is a required nonempty plain string.
+Reuse the existing lab capability model and security properties:
 
-Maximum size is 1,024 bytes in UTF-8, not 1,024 JavaScript characters. Validate byte size accordingly. Accept a payload exactly at the byte limit and reject larger payloads.
+- cryptographically secure high-entropy opaque token;
+- raw token never persisted;
+- one-way hash persisted for lookup;
+- bound to one chain and expected hop operation;
+- 24-hour expiry;
+- successful consumption at most once;
+- consumption and successor creation atomic so replay/concurrency cannot fork the chain;
+- malformed, unknown, expired, replayed, and wrong-operation use rejected without successor.
 
-Entries persist after capability expiry. Do not add entry expiry or cleanup in this slice.
+Do not weaken Slice 1 capability behavior.
 
-### 6. Observability
+If the existing `0014` CHECK constraints cannot represent the hop operation/event taxonomy, add the next repository migration rather than editing historical migration 0014. Inspect current migration numbering first; if main is still through 0014, use `0015_agent_lab_hop_probe.sql`. Preserve all existing experimental rows during upgrade.
 
-Record append-only events sufficient to reconstruct chain creation and capability use/rejection without storing raw capabilities or copying arbitrary entry content into telemetry.
+### 5. Persistence and observability
 
-At minimum retain timestamps, chain identity where known, operation/outcome, and safe target/capability metadata appropriate to the event. Keep this simple; this is experiment instrumentation, not a generalized analytics system.
+Use the existing isolated experimental persistence where it fits cleanly. Add only the smallest schema extension/rebuild required for hop operation/depth.
 
-### 7. Preserve discovery isolation
+Record append-only events sufficient to reconstruct:
 
-Do not expose or advertise the lab through:
+- hop chain entrance;
+- successful A, B, C consumption;
+- terminal completion;
+- rejected attempts and their safe outcome classification.
 
-- `llms.txt`;
-- sitemap changes;
-- normal Loom pages;
-- project/participant manifests;
-- crawler metadata;
-- agent discovery hints.
+Do not persist raw capabilities. This slice has no arbitrary message payload and must not create or mutate Slice 1 scratch entries.
 
-Experiment 1 receives the entrance URL explicitly from the operator.
+The implementation needs a reliable server-side way to know whether a capability is A, B, or C / which hop depth comes next. Prefer the smallest explicit persisted representation that preserves atomicity and makes tests unambiguous; do not infer depth from token contents.
+
+### 6. HTTP behavior
+
+All hop responses, successful or rejected, must preserve the lab's primitive behavior:
+
+- `text/plain; charset=utf-8`;
+- `Cache-Control: no-store`;
+- simple errors without hashes/internal state/token-oracle detail.
+
+Nonterminal success: exactly one `next` URL.
+Terminal success: `success: pebble-hop-complete` and no successor.
+
+### 7. Preserve experiment isolation
+
+Do not advertise the hop probe in `llms.txt`, sitemaps, normal Loom UI, project manifests, crawler metadata, or ordinary agent discovery surfaces.
+
+The operator will explicitly supply `/agent-lab/hop/enter` to a fresh external chat.
 
 ## Required tests
 
-Add focused integration coverage for the lab protocol. At minimum test:
+Add focused integration coverage proving at minimum:
 
-1. `/agent-lab/enter` creates a fresh chain and returns a usable absolute write URL.
-2. A random nonce can be written and read back exactly through `enter -> write -> read`.
-3. successful responses are plain text and `Cache-Control: no-store`.
-4. empty values are rejected.
-5. exactly 1,024 UTF-8 bytes are accepted and 1,025+ bytes are rejected, including a multibyte-character case so byte-counting is real.
-6. replaying A cannot create a second entry or issue another B.
-7. replaying B cannot perform another successful protected read or issue another C.
-8. a capability cannot be used for the wrong operation.
-9. an entry from another chain cannot be read through B.
-10. expired capabilities are rejected.
-11. malformed/unknown capabilities are rejected without useful token-oracle leakage.
-12. raw capability values are absent from capability/event persistence.
-13. concurrent/repeated consumption cannot fork the chain or duplicate the protected action where the test environment can exercise this reliably.
-14. unrelated protected Loom routes remain protected; the anonymous routing exception is lab-only.
+1. `/agent-lab/hop/enter` creates a fresh chain and returns exactly one complete absolute `next` URL containing A.
+2. A did not exist before entrance; B does not exist before successful A consumption; C does not exist before successful B consumption.
+3. the exact successful path is `enter -> A -> B -> C -> terminal`.
+4. A response contains exactly one literal B URL and B response exactly one literal C URL; no URL editing/interpolation is required.
+5. C returns exactly `success: pebble-hop-complete` with optional final newline, no `next` URL, and no successor capability.
+6. replaying A cannot create another B or advance the chain.
+7. replaying B cannot create another C or advance the chain.
+8. replaying C cannot produce another successful terminal transition or successor.
+9. malformed/unknown/expired hop capabilities are rejected without successors.
+10. a Slice 1 write/read capability cannot be used as a hop capability, and a hop capability cannot be used for Slice 1 write/read.
+11. raw A/B/C capability values are absent from persistence/event rows.
+12. concurrent consumption cannot fork B/C where the test environment can exercise this reliably.
+13. hop success/error responses are plain text and `Cache-Control: no-store`.
+14. existing Slice 1 tests continue to pass unchanged in semantics.
+15. unrelated protected Loom routes remain protected.
 
-Use direct DB inspection in tests where necessary to prove persistence/security invariants rather than inferring them only from HTTP responses.
+Use direct D1 inspection where useful to prove successor timing, single-use behavior, and absence of raw tokens rather than inferring all invariants from response text.
 
 ## Migration verification
 
-Because this slice adds schema, follow `AGENTS.md` migration rules. Verify both:
+If a migration is needed, follow `AGENTS.md` migration rules and verify both:
 
-- a fresh database applying all migrations through 0014;
-- an existing pre-0014 database upgraded through 0014 without resetting or losing existing Loom data.
+- fresh database applying all migrations through the new migration;
+- existing database through 0014 upgraded through the new migration without resetting or losing Slice 1 lab rows or ordinary Loom data.
 
 Do not edit historical migrations.
 
@@ -135,18 +162,14 @@ Do not edit historical migrations.
 
 The slice is complete when:
 
-- migration 0014 adds isolated lab persistence without altering ordinary Loom data semantics;
-- the three lab routes implement the documented protocol;
-- an anonymous caller can complete the nonce write/read path using only returned GET URLs;
-- A and B are genuinely one-use and cannot fork/replay;
-- capabilities expire after 24 hours;
-- payload validation uses UTF-8 bytes and enforces the 1,024-byte maximum;
-- raw capabilities are never persisted;
-- scratch content is not duplicated into event telemetry;
-- lab responses are plain text, absolute-URL driven, and non-cacheable;
-- the lab is not advertised through existing machine discovery surfaces;
-- ordinary Loom authorization remains unchanged;
-- required tests and repository baseline checks pass in CI.
+- the two hop routes implement exactly `enter -> A -> B -> C -> terminal`;
+- each nonterminal successor is created only after successful predecessor consumption;
+- each nonterminal response contains one complete literal absolute next URL requiring no modification;
+- capabilities remain hashed, one-use, expiring, operation-bound, and atomically consumed;
+- terminal C consumption produces `success: pebble-hop-complete` and no successor;
+- the probe remains isolated and undiscoverable through existing Loom surfaces;
+- Slice 1 behavior and ordinary authorization remain unchanged;
+- required tests and baseline checks pass.
 
 ## Required checks
 
@@ -158,36 +181,34 @@ npm run typecheck
 git diff --check
 ```
 
-Also perform the smallest meaningful functional smoke test of the actual rendered/deployed-equivalent request chain available in the environment: enter, write a unique nonce, read it back, then demonstrate replay rejection. Do not use production for Codex testing.
+Also perform the smallest non-production functional smoke available: request hop entrance, follow A, then B, then C, verify the terminal marker, then verify replay rejection. Do not use production for Codex testing.
 
-If Codex's environment cannot install dependencies because of its known registry/network restrictions, report that limitation exactly and do not alter dependencies or security settings to compensate. The PR's GitHub Actions run is the independent baseline verification layer.
+If Codex cannot install dependencies because of registry/network restrictions, report that exactly and do not alter dependencies or security settings to compensate. GitHub Actions remains the independent baseline verification layer.
 
 ## Documentation
 
-`docs/AGENT_GET_CAPABILITY_EXPERIMENT.md` is the durable source of truth for this experimental protocol. Update it only if implementation reveals a necessary clarification; do not silently change settled semantics.
+The durable Slice 2 contract is already recorded in `docs/AGENT_GET_CAPABILITY_EXPERIMENT.md`. Update it only if implementation exposes a necessary clarification; do not silently change the experimental question or settled semantics.
 
-Do not fold this experiment into `docs/AGENT_ACCESS.md`. Ordinary authenticated machine access and the isolated GET lab intentionally remain separate concepts.
+Do not fold the lab into `docs/AGENT_ACCESS.md`.
 
 ## Explicit non-goals
 
 Do not implement:
 
-- lab discovery, crawler bait, or `llms.txt` changes;
-- an index/list/search endpoint;
-- a fourth route to consume capability C;
-- multiple-write loops;
-- lab UI or management controls;
-- participant/agent identity or signup;
-- project/document access from lab capabilities;
-- ordinary document mutation;
-- compression behavior;
-- agent check-in changes;
-- credits, work-for-access, reputation, or quotas;
-- agent-to-agent messaging or coordination semantics;
-- entry editing/deletion/cleanup;
+- alphabet/link keyboard;
+- arbitrary/compositional message writing;
+- hop mutation of scratch entries;
+- discovery, crawler bait, or `llms.txt` changes;
+- redirects or alternate-host workarounds;
+- shell/curl-specific behavior;
+- UI;
+- project/document access;
+- participant/agent identity;
+- work-for-access, credits, reputation, quotas;
+- agent messaging/coordination;
 - generalized GET mutation outside `/agent-lab`;
-- changes to ordinary machine credentials/authentication;
+- ordinary machine-auth changes;
 - deployment automation;
-- unrelated refactors or cleanup.
+- unrelated refactors.
 
-Keep the implementation intentionally small. The purpose is to get a real experimental fixture deployed so the external-agent behavior can be tested before Loom invests in later recognition, discovery, or coordination experiments.
+Keep this tiny. Its value is the empirical answer, including if the external chat fails at the second hop.
