@@ -95,13 +95,9 @@ DOCUMENT:
 
 The v2 text is retained here as historical documentation and must not be rewritten.
 
-The copy action is deliberately a convenience export, not a model call. It copies one ready-to-paste request containing:
+Historically, the v2 copy action was a convenience export rather than a model call. It copied the exact `compression-prompt-v2` instructions with the current document title and full text. Those requirements are retained for preservation and provenance regression coverage, not as the current UI contract.
 
-1. the exact `compression-prompt-v2` instructions;
-2. the current document title substituted for `[document title]`;
-3. the current full document text substituted for `[full document text]`.
-
-The copied title and text must be the document state represented by the current full-text revision shown in the view. Copying uses only the user's clipboard: Loom must not transmit document content to OpenAI, another model provider, analytics, or any third party as part of this action.
+For the current participant-owned and project-native UI, the copy action uses the repository-owned `compression-prompt-v3` contract from `COMPRESSION.md`, including the current title, full text, and authoritative source revision ID. The copied title and text must be the document state represented by the current full-text revision shown in the view. Copying uses only the user's clipboard: Loom must not transmit document content to OpenAI, another model provider, analytics, or any third party as part of this action.
 
 Because the clipboard payload contains classified document content, do not log it, persist a duplicate merely for copying, place it in URLs, or expose it to viewers lacking current full-content access. The existing document view's access decision remains authoritative.
 
@@ -190,11 +186,11 @@ Use the operation/state model in [TESTING_MODEL.md](./TESTING_MODEL.md). Compres
 
 Historical v2 compatibility and the current v3 workflow require tests or equivalent focused coverage proving:
 
-- historical v1/v2 provenance remains unchanged, while the canonical new-save prompt version is `compression-prompt-v3`;
-- v1 remains unchanged as historical provenance;
-- the v2 prompt explicitly says the compression must not exceed 2,000 characters including spaces;
-- the copy action contains the exact canonical v2 instructions plus the current document title and current full document text;
-- participant-owned and project-native copy behavior use the same canonical implementation;
+- historical v1/v2 text and provenance remain unchanged and readable;
+- legacy prose and structured v3 artifacts remain explicitly distinguishable;
+- historical v2 documentation retains its 2,000-character instruction without making v2 the current prompt;
+- new saves record `compression-prompt-v3`;
+- current participant-owned and project-native copy behavior use the same canonical v3 implementation with title, source revision ID, and full text;
 - copying performs no network/model request and does not mutate the document;
 - the UI visibly states the limit and updates a live `N / 2,000` character count;
 - saving still enforces the 2,000-character limit independently of prompt compliance.

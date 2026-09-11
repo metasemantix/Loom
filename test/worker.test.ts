@@ -12,19 +12,29 @@ const projection=(source:string,kind="design_spec",contents:Record<string,unknow
 it("validates restrained document-sensitive v3 payload shapes",()=>{
   const source="ver_validation";
   for(const [kind,contents] of [
-    ["design_spec",{decisions:[]}],
-    ["meeting",{actions:[]}],
-    ["incident_report",{observations:[],interpretations:[]}],
-    ["reference",{facts:[]}],
-    ["general",{summary_points:["Grounded point"]}]
+    ["design_spec",{decisions:["Use a versioned envelope"]}],
+    ["idea_collection",{items:[{name:"Airlock",kind:"hostile-input handling",gist:"Separates untrusted retrieved material.",topics:["security"]}]}],
+    ["meeting",{actions:[{owner:"Alice",action:"Review the proposal"}]}],
+    ["incident_report",{observations:["Requests failed after deployment"],interpretations:[{claim:"Configuration may be involved",confidence:"tentative"}]}],
+    ["reference",{facts:["The endpoint accepts JSON"]}],
+    ["general",{summary_points:["Grounded point"],arbitrary_but_grounded:{detail:"Allowed by the fallback"}}]
   ] as const)expect(validateCompression(projection(source,kind,contents),source)).not.toHaveProperty("error");
   for(const [kind,contents] of [
     ["design_spec",{constraints:"not an array"}],
     ["meeting",{actions:{owner:"Alice"}}],
     ["incident_report",{events:"not an array"}],
     ["reference",{caveats:false}],
-    ["general",{" ":[]}]
+    ["general",{" ":[]}],
+    ["design_spec",{items:[{name:"Wrong taxonomy"}]}],
+    ["meeting",{facts:["Wrong taxonomy"]}],
+    ["incident_report",{}],
+    ["reference",{facts:[false]}],
+    ["meeting",{actions:[{owner:{nested:"junk"}}]}]
   ] as const)expect(validateCompression(projection(source,kind,contents),source)).toHaveProperty("error");
+  const canonical=JSON.parse(projection(source));
+  expect(validateCompression(JSON.stringify(canonical),source)).not.toHaveProperty("error");
+  expect(validateCompression(JSON.stringify({...canonical,extra:"not canonical"}),source)).toHaveProperty("error");
+  expect(validateCompression(JSON.stringify({...canonical,derived_patterns:["downstream cognition"]}),source)).toHaveProperty("error");
 });
 
 async function sha256(value: string): Promise<string> {

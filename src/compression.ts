@@ -46,6 +46,9 @@ export function validateCompression(value:unknown, sourceVersionId:unknown):{tex
   let artifact:unknown;try{artifact=JSON.parse(value)}catch{return {error:"compression must be valid JSON"}}
   if(!artifact||typeof artifact!=="object"||Array.isArray(artifact))return {error:"compression must be a JSON object"};
   const a=artifact as Record<string,unknown>;
+  const envelopeFields=new Set(["schema_version","source_revision","document_kind","gist","topics","contents"]);
+  const unknownEnvelopeField=Object.keys(a).find(field=>!envelopeFields.has(field));
+  if(unknownEnvelopeField)return {error:`compression contains unknown top-level field ${unknownEnvelopeField}`};
   if(a.schema_version!==COMPRESSION_SCHEMA_VERSION)return {error:"compression schema_version must be 1"};
   if(typeof a.source_revision!=="string"||!a.source_revision)return {error:"compression source_revision must be a non-empty string"};
   if(typeof sourceVersionId!=="string"||!sourceVersionId)return {error:"sourceVersionId is required when saving compression"};
@@ -61,14 +64,34 @@ export function validateCompression(value:unknown, sourceVersionId:unknown):{tex
     incident_report:["events","observations","interpretations","unresolved_matters"],
     reference:["entities","facts","caveats"]
   };
-  for(const field of arrayFields[a.document_kind]??[]){
-    if(field in contents&&!Array.isArray(contents[field]))return {error:`${a.document_kind} contents.${field} must be an array when present`};
+  const knownKindFields=new Set(["items",...Object.values(arrayFields).flat()]);
+  const expectedFields=arrayFields[a.document_kind]??[];
+  if(a.document_kind!=="general"){
+    const wrongField=Object.keys(contents).find(field=>knownKindFields.has(field)&&!expectedFields.includes(field)&&!(a.document_kind==="idea_collection"&&field==="items"));
+    if(wrongField)return {error:`${a.document_kind} contents.${wrongField} belongs to a different document kind`};
+  }
+  const sensibleEntry=(entry:unknown):boolean=>{
+    if(typeof entry==="string")return Boolean(entry.trim());
+    if(!entry||typeof entry!=="object"||Array.isArray(entry)||!Object.keys(entry).length)return false;
+    return Object.entries(entry as Record<string,unknown>).every(([key,value])=>Boolean(key.trim())&&(
+      typeof value==="string"?Boolean(value.trim()):
+      typeof value==="number"?Number.isFinite(value):
+      typeof value==="boolean"||value===null||Array.isArray(value)&&value.length>0&&value.every(item=>typeof item==="string"&&Boolean(item.trim()))
+    ));
+  };
+  let appropriateEntries=0;
+  for(const field of expectedFields){
+    if(!(field in contents))continue;
+    if(!Array.isArray(contents[field]))return {error:`${a.document_kind} contents.${field} must be an array`};
+    if(!(contents[field] as unknown[]).every(sensibleEntry))return {error:`${a.document_kind} contents.${field} entries must be non-empty strings or simple structured entries`};
+    appropriateEntries+=(contents[field] as unknown[]).length;
   }
   if(a.document_kind==="idea_collection"){
     const items=contents.items;
     if(!Array.isArray(items))return {error:"idea_collection contents.items must be an array"};
     for(const item of items){if(!item||typeof item!=="object"||Array.isArray(item))return {error:"each idea_collection item must be an object"};const i=item as Record<string,unknown>;if(typeof i.name!=="string"||!i.name.trim()||typeof i.kind!=="string"||!i.kind.trim()||typeof i.gist!=="string"||!i.gist.trim()||!Array.isArray(i.topics)||i.topics.some(x=>typeof x!=="string"))return {error:"each idea_collection item requires non-empty string name, kind, gist, and string-array topics"}}
   }
+  if(a.document_kind!=="general"&&(a.document_kind==="idea_collection"?(contents.items as unknown[]).length===0:appropriateEntries===0))return {error:`${a.document_kind} contents must include at least one appropriate entry`};
   if(a.document_kind==="general"&&Object.keys(contents).some(key=>!key.trim()))return {error:"general contents field names must be non-empty"};
   return {text:value,artifact:a as Projection};
 }
