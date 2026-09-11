@@ -49,9 +49,9 @@ A new full-text revision leaves the existing compression text and source binding
 
 Legacy compression strings survive migration without inventing a source revision or original creator/timestamp. Migration provenance is separate from known authorship. Unknown legacy bindings remain explicit until a user reviews and saves a new bound revision.
 
-## Standard manual generation prompt
+## Historical prose manual-generation prompts
 
-Before Loom performs native model calls, the manual workflow is the reference implementation for compression generation. The UI provides a short explanation and a one-click copy control for a repository-owned generation request above the editable compression field.
+The current structured manual workflow is defined in [`COMPRESSION.md`](./COMPRESSION.md). This section preserves the historical prose prompt contracts so their immutable provenance remains intelligible.
 
 The human-facing section name is **Agent compression**. Its explanation communicates that this is a compact semantic representation agents can use to judge relevance before retrieving full document content.
 
@@ -65,7 +65,7 @@ Do not rewrite historical `compression-prompt-v1` provenance to v2.
 
 ### `compression-prompt-v2`
 
-`compression-prompt-v2` is the canonical prompt for new manual generation after this change:
+`compression-prompt-v2` was the canonical prompt for prose manual generation before structured v3:
 
 ```text
 Create a concise semantic compression of the document below for an AI agent that must decide whether the full document is relevant.
@@ -93,7 +93,7 @@ DOCUMENT:
 [full document text]
 ```
 
-Keep the canonical v2 prompt in one repository-owned code/source location and reuse it from participant-owned and project-native UI rather than maintaining divergent copies.
+The v2 text is retained here as historical documentation and must not be rewritten.
 
 The copy action is deliberately a convenience export, not a model call. It copies one ready-to-paste request containing:
 
@@ -107,9 +107,9 @@ Because the clipboard payload contains classified document content, do not log i
 
 The human remains responsible for pasting the request into an external LLM if desired, reviewing the result, and deciding whether to save it to Loom. Loom does not infer or fabricate the external model's identity.
 
-## Manual workflow and document UI
+## Historical v2 manual workflow and document UI
 
-The usable manual workflow is:
+The v2 workflow was:
 
 1. Open the document and identify its current full-text version.
 2. In **Agent compression**, use the copy control to copy the ready-to-paste `compression-prompt-v2` request containing the current title and full text.
@@ -137,7 +137,7 @@ A metadata-only document edit does not stale compression. Only a new full-conten
 
 The saving participant is not automatically the authoring model. Do not invent model identity or generation provenance for pasted text.
 
-A saved prompt version records the Loom generation recipe associated with the manual workflow; it does not prove which external model was used or that the clipboard payload was pasted unchanged. New manual saves after this workflow change should record `compression-prompt-v2` where the implementation currently records the canonical Loom prompt version. Existing v1 compression revisions retain v1 provenance.
+A saved prompt version records the Loom generation recipe associated with the manual workflow; it does not prove which external model was used or that the clipboard payload was pasted unchanged. Historical v1/v2 revisions retain their recorded provenance. New structured saves record `compression-prompt-v3` as defined in `COMPRESSION.md`.
 
 Verified generator details can be added later.
 
@@ -188,9 +188,9 @@ Use the operation/state model in [TESTING_MODEL.md](./TESTING_MODEL.md). Compres
 - authorized agent responses exposing alignment without widening disclosure;
 - server-side/input enforcement of the 2,000-character maximum.
 
-The v2 manual-workflow UI additionally requires tests or equivalent focused coverage proving:
+Historical v2 compatibility and the current v3 workflow require tests or equivalent focused coverage proving:
 
-- the canonical new-save prompt version is `compression-prompt-v2`;
+- historical v1/v2 provenance remains unchanged, while the canonical new-save prompt version is `compression-prompt-v3`;
 - v1 remains unchanged as historical provenance;
 - the v2 prompt explicitly says the compression must not exceed 2,000 characters including spaces;
 - the copy action contains the exact canonical v2 instructions plus the current document title and current full document text;
@@ -200,3 +200,6 @@ The v2 manual-workflow UI additionally requires tests or equivalent focused cove
 - saving still enforces the 2,000-character limit independently of prompt compliance.
 
 Automatic model calls, agent document writes, new GPT Action document reads, compression restoration, competing compression candidates, ranking/orchestration, and verified external-model provenance remain outside this contract.
+## Structured compression v3
+
+[`COMPRESSION.md`](./COMPRESSION.md) is authoritative for the canonical structured v3 artifact, its document-sensitive taxonomy, validation, machine representation, and current manual-generation workflow. The prose v1/v2 templates above are retained only to document historical prompt provenance and readable historical revisions; new manual saves use `compression-prompt-v3`. All source binding, freshness, immutable-history, authorization, and deletion rules in this document continue to apply unchanged.
