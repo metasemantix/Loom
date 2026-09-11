@@ -19,9 +19,13 @@ describe("isolated experimental GET capability chain",()=>{
   it("creates a fresh anonymous chain and advertises an absolute write URL",async()=>{
     const first=await enter(),second=await enter();
     expect(new URL(first.write).origin).toBe(origin);expect(new URL(first.write).pathname).toBe("/agent-lab/write");
-    expect(new URL(first.write).searchParams.get("cap")).not.toBe(new URL(second.write).searchParams.get("cap"));
+    const firstCapability=new URL(first.write).searchParams.get("cap")!;
+    expect(firstCapability).not.toBe(new URL(second.write).searchParams.get("cap"));
     expect(first.response.headers.get("content-type")).toBe("text/plain; charset=utf-8");expect(first.response.headers.get("cache-control")).toBe("no-store");
     expect((await env.DB.prepare("SELECT count(*) count FROM agent_lab_chains").first<{count:number}>())!.count).toBeGreaterThanOrEqual(2);
+    const issued=await env.DB.prepare("SELECT created_at,expires_at FROM agent_lab_capabilities WHERE token_hash=?").bind(await hashSecret(firstCapability)).first<{created_at:string;expires_at:string}>();
+    expect(issued).toBeTruthy();
+    expect(Math.abs(Date.parse(issued!.expires_at)-Date.parse(issued!.created_at)-24*60*60*1000)).toBeLessThanOrEqual(1_000);
   });
 
   it("writes and reads a nonce exactly, with plain-text non-cacheable responses",async()=>{

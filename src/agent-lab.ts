@@ -56,7 +56,7 @@ export async function writeAgentLab(request:Request,env:Env):Promise<Response> {
     env.DB.prepare(`UPDATE agent_lab_capabilities SET consumed_at=?,consumption_id=? WHERE token_hash=? AND expected_operation='write' AND consumed_at IS NULL AND expires_at>?`).bind(at,consumptionId,hash,at),
     env.DB.prepare(`INSERT INTO agent_lab_entries(id,chain_id,entry_index,value,byte_count,content_hash,created_at) SELECT ?,chain_id,COALESCE((SELECT MAX(e.entry_index)+1 FROM agent_lab_entries e WHERE e.chain_id=agent_lab_capabilities.chain_id),1),?,?,?,? FROM agent_lab_capabilities WHERE consumption_id=?`).bind(entryId,value,byteCount,contentHash,at,consumptionId),
     env.DB.prepare(`INSERT INTO agent_lab_capabilities(id,chain_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,?,'read',?,? FROM agent_lab_capabilities WHERE consumption_id=?`).bind(successorId,await hashSecret(successor),at,expires(now),consumptionId),
-    env.DB.prepare(`INSERT INTO agent_lab_events(id,chain_id,capability_id,operation,outcome,entry_id,byte_count,content_hash,created_at) SELECT ?,chain_id,id,'write','allowed',?,?,?,?,? FROM agent_lab_capabilities WHERE consumption_id=?`).bind(opaque("ale"),entryId,byteCount,contentHash,at,consumptionId),
+    env.DB.prepare(`INSERT INTO agent_lab_events(id,chain_id,capability_id,operation,outcome,entry_id,byte_count,content_hash,created_at) SELECT ?,chain_id,id,'write','allowed',?,?,?,? FROM agent_lab_capabilities WHERE consumption_id=?`).bind(opaque("ale"),entryId,byteCount,contentHash,at,consumptionId),
   ]);
   if((results[0].meta.changes??0)!==1)return rejected(env,"write",capability);
   return text(`entry: ${entryId}\nread: ${absolute(request,"/agent-lab/read",{cap:successor,id:entryId})}\n`);
