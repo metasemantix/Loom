@@ -12,6 +12,7 @@ import agentCheckins from "../migrations/0010_agent_checkins.sql?raw";
 import compressionRevisions from "../migrations/0011_compression_revisions.sql?raw";
 import structuredCompression from "../migrations/0012_structured_compression_v3.sql?raw";
 import expandedCompressionSize from "../migrations/0013_expand_compression_size.sql?raw";
+import agentGetCapabilityExperiment from "../migrations/0014_agent_get_capability_experiment.sql?raw";
 
 function statements(sql:string){const result:string[]=[],lines:string[]=[],flush=()=>{const value=lines.join("\n").trim().replace(/;$/,"");lines.length=0;if(value)result.push(value)};let trigger=false;for(const line of sql.split("\n")){if(/^CREATE TRIGGER\b/.test(line.trim()))trigger=true;lines.push(line);if(trigger?/^END;$/.test(line.trim()):line.trim().endsWith(";")){flush();trigger=false}}flush();return result}
 async function apply(sql:string){for(const statement of statements(sql))await env.DB.prepare(statement).run()}
@@ -59,5 +60,6 @@ const compressionRowsBeforeExpansion=(await env.DB.prepare(`SELECT * FROM compre
 await apply(expandedCompressionSize);
 const compressionRowsAfterExpansion=(await env.DB.prepare(`SELECT * FROM compression_revisions WHERE document_id='doc_migration' ORDER BY revision_number`).all()).results;
 const selectedCompressionAfterExpansion=await env.DB.prepare(`SELECT selected_compression_revision_id FROM documents WHERE id='doc_migration'`).first();
+await apply(agentGetCapabilityExperiment);
 const foreignKeyErrors=(await env.DB.prepare(`PRAGMA foreign_key_check`).all()).results;
 (globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,migratedProseCompression,migratedStructuredColumns,compressionRowsBeforeExpansion,compressionRowsAfterExpansion,selectedCompressionAfterExpansion,foreignKeyErrors};
