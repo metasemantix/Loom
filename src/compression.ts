@@ -27,7 +27,7 @@ Keep gist compact and retrieval-oriented. Topics and all contents must be ground
 
 Prefer the smallest complete semantic projection. Most documents should fit within 4,000 characters; aim for 4,000 characters or fewer, and do not add detail merely because additional space is available. Compression is a retrieval-oriented projection, not a substitute for the full document.
 
-When necessary to preserve independently meaningful items, important distinctions, or source-grounded structure, the projection may exceed that preferred target. The absolute maximum is 8,000 characters, including the complete JSON envelope. Never meet the 4,000-character target by truncating JSON, dropping required structure, collapsing independently meaningful idea_collection items into generic prose, or omitting distinctions that materially affect retrieval.
+When necessary to preserve independently meaningful items, important distinctions, or source-grounded structure, the projection may exceed that preferred target. The absolute maximum for generation is 5,000 characters, including the complete JSON envelope. Never meet the 4,000-character target by truncating JSON, dropping required structure, collapsing independently meaningful idea_collection items into generic prose, or omitting distinctions that materially affect retrieval.
 
 DOCUMENT TITLE:
 [document title]
