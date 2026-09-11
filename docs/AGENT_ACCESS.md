@@ -81,11 +81,11 @@ Metadata itself is still caller-aware. Do not leak private document existence or
 
 A concise semantic description of what the document says something about, intended to help an agent decide whether retrieving the full body is useful.
 
-For the first slice this is a nullable, inspectable field maintained manually by humans. Do not make AI generation a prerequisite for machine access. A future Loom AI may generate or propose compressions.
+Compression is maintained manually by humans; do not make AI generation a prerequisite for machine access. New v3 compression is a structured semantic projection governed by `COMPRESSION.md`. Machine responses expose it as parsed structured data with an explicit format and schema discriminator while retaining the nullable string compatibility field. A future Loom AI may generate or propose compressions.
 
 Compression is classified content rather than harmless technical metadata. A caller may receive it only when current project read rules permit it.
 
-The shared identity, revision, history, and freshness contract is defined in [DOCUMENT_LIFECYCLE.md](./DOCUMENT_LIFECYCLE.md). The initial nullable field is implemented; source-version binding and compression revisions are the next documented slice. Once implemented, agent discovery and retrieval must explicitly distinguish current, stale, missing, and legacy-unknown compression and expose its relationship to the current full-text revision. Compression history must obey content access rules as well.
+The shared identity, revision, history, and freshness contract is defined in [DOCUMENT_LIFECYCLE.md](./DOCUMENT_LIFECYCLE.md). Source-version binding and immutable compression revisions are implemented. Agent discovery and retrieval explicitly distinguish current, stale, missing, and legacy-unknown compression and expose its relationship to the current full-text revision. Structured v3 data is additive and follows the same content authorization; compression history must obey content access rules as well.
 
 ### 3. Full content
 

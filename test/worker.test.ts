@@ -3,9 +3,39 @@ import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { DEV_PARTICIPANT_ID, DEV_USER_ID } from "../src/dev-auth";
-import { COMPRESSION_PROMPT, COMPRESSION_PROMPT_VERSION, compressionRequest } from "../src/compression";
+import { COMPRESSION_PROMPT, COMPRESSION_PROMPT_VERSION, compressionRequest, validateCompression } from "../src/compression";
 
 const origin = "http://example.com";
+
+const projection=(source:string,kind="design_spec",contents:Record<string,unknown>={key_points:["Important point"]})=>JSON.stringify({schema_version:1,source_revision:source,document_kind:kind,gist:"A source-grounded retrieval gist.",topics:["retrieval"],contents});
+
+it("validates restrained document-sensitive v3 payload shapes",()=>{
+  const source="ver_validation";
+  for(const [kind,contents] of [
+    ["design_spec",{decisions:["Use a versioned envelope"]}],
+    ["idea_collection",{items:[{name:"Airlock",kind:"hostile-input handling",gist:"Separates untrusted retrieved material.",topics:["security"]}]}],
+    ["meeting",{actions:[{owner:"Alice",action:"Review the proposal"}]}],
+    ["incident_report",{observations:["Requests failed after deployment"],interpretations:[{claim:"Configuration may be involved",confidence:"tentative"}]}],
+    ["reference",{facts:["The endpoint accepts JSON"]}],
+    ["general",{summary_points:["Grounded point"],arbitrary_but_grounded:{detail:"Allowed by the fallback"}}]
+  ] as const)expect(validateCompression(projection(source,kind,contents),source)).not.toHaveProperty("error");
+  for(const [kind,contents] of [
+    ["design_spec",{constraints:"not an array"}],
+    ["meeting",{actions:{owner:"Alice"}}],
+    ["incident_report",{events:"not an array"}],
+    ["reference",{caveats:false}],
+    ["general",{" ":[]}],
+    ["design_spec",{items:[{name:"Wrong taxonomy"}]}],
+    ["meeting",{facts:["Wrong taxonomy"]}],
+    ["incident_report",{}],
+    ["reference",{facts:[false]}],
+    ["meeting",{actions:[{owner:{nested:"junk"}}]}]
+  ] as const)expect(validateCompression(projection(source,kind,contents),source)).toHaveProperty("error");
+  const canonical=JSON.parse(projection(source));
+  expect(validateCompression(JSON.stringify(canonical),source)).not.toHaveProperty("error");
+  expect(validateCompression(JSON.stringify({...canonical,extra:"not canonical"}),source)).toHaveProperty("error");
+  expect(validateCompression(JSON.stringify({...canonical,derived_patterns:["downstream cognition"]}),source)).toHaveProperty("error");
+});
 
 async function sha256(value: string): Promise<string> {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -98,7 +128,7 @@ describe("local development authentication", () => {
 });
 
 describe("migration upgrade safety",()=>{
-  it("preserves existing corpus state and makes existing machine credentials read-only",()=>{const result=(globalThis as typeof globalThis & {__loomMigrationRegression:{before:unknown;after:unknown;afterProjectDeletionMigration:unknown;migratedCredential:unknown;foreignKeyErrors:unknown[]}}).__loomMigrationRegression;expect(result.after).toEqual(result.before);expect(result.afterProjectDeletionMigration).toEqual(result.before);expect(result.migratedCredential).toEqual({id:"mac_migration",checkin_enabled:0});expect(result.foreignKeyErrors).toEqual([])})
+  it("preserves existing corpus state while migrating machine credentials and legacy compression",()=>{const result=(globalThis as typeof globalThis & {__loomMigrationRegression:{before:unknown;after:unknown;afterProjectDeletionMigration:unknown;migratedCredential:unknown;migratedProseCompression:unknown;migratedStructuredColumns:unknown;foreignKeyErrors:unknown[]}}).__loomMigrationRegression;expect(result.after).toEqual(result.before);expect(result.afterProjectDeletionMigration).toEqual(result.before);expect(result.migratedCredential).toEqual({id:"mac_migration",checkin_enabled:0});expect(result.migratedProseCompression).toMatchObject({id:"cmp_legacy_doc_migration",text:"Historical prose compression",source_version_id:null,actor_type:null,actor_id:null,created_at:null,prompt_version:null});expect(result.migratedStructuredColumns).toEqual({text:"Historical prose compression",prompt_version:null,artifact_format:"legacy-prose",schema_version:null,artifact_json:null});expect(result.foreignKeyErrors).toEqual([])})
 });
 
 async function invite(projectId:string, inviter:{cookie:string}, recipient:{cookie:string}) {
@@ -733,7 +763,7 @@ describe("read-only machine access",()=>{
     const owner=await participant("agent_owner"),other=await participant("agent_other");
     const projectResponse=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Agent corpus",readAudience:"agents_only"})});
     const projectId=(await projectResponse.json<any>()).project.id,source=await create(owner.cookie);
-    await SELF.fetch(`${origin}/api/me/documents/${source}/metadata`,{method:"PUT",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({compression:"Participant summary"})});
+    const sourceDocument=await SELF.fetch(`${origin}/api/documents/${source}`,{headers:{cookie:owner.cookie}}).then(r=>r.json<any>());const participantProjection=projection(sourceDocument.document.current_version_id,"idea_collection",{items:[{name:"Prompt Bleach",kind:"hostile-input handling",gist:"Handles hostile input.",topics:["prompt injection"]},{name:"Dead Drop",kind:"agent communication",gist:"Supports agent exchange.",topics:["agents"]}]});await SELF.fetch(`${origin}/api/me/documents/${source}/metadata`,{method:"PUT",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({compression:participantProjection,sourceVersionId:sourceDocument.document.current_version_id})});
     await SELF.fetch(`${origin}/api/projects/${projectId}/documents`,{method:"POST",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({documentId:source})});
     const nativeResponse=await SELF.fetch(`${origin}/api/projects/${projectId}/native-documents`,{method:"POST",headers:{cookie:owner.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Native",content:"native body",contentType:"text/plain"})}),nativeId=(await nativeResponse.json<any>()).document.id;
     expect((await SELF.fetch(`${origin}/api/projects/${projectId}/agent-credentials`,{method:"POST",headers:{cookie:other.cookie,origin,"content-type":"application/json"},body:JSON.stringify({label:"Denied"})})).status).toBe(403);
@@ -741,7 +771,7 @@ describe("read-only machine access",()=>{
     const creation=await created.json<any>(),token=creation.token,headers={authorization:`Bearer ${token}`};expect(token).toMatch(/^loom_agent_[a-f0-9]{36}$/);
     const stored=await env.DB.prepare(`SELECT token_hash,fingerprint FROM project_machine_credentials WHERE id=?`).bind(creation.credential.id).first<any>();expect(stored.token_hash).not.toContain(token);expect(stored.fingerprint).toHaveLength(12);
     expect((await SELF.fetch(`${origin}/api/agent/me`,{headers}).then(r=>r.json<any>())).caller.grant.projectId).toBe(projectId);
-    const discovery=await SELF.fetch(`${origin}/api/agent/documents`,{headers}).then(r=>r.json<any>());expect(discovery.documents).toEqual(expect.arrayContaining([expect.objectContaining({id:source,ownership_kind:"participant",compression:"Participant summary"}),expect.objectContaining({id:nativeId,ownership_kind:"project"})]));
+    const discovery=await SELF.fetch(`${origin}/api/agent/documents`,{headers}).then(r=>r.json<any>());expect(discovery.documents).toEqual(expect.arrayContaining([expect.objectContaining({id:source,ownership_kind:"participant",compression:participantProjection,compression_format:"structured-v3",compression_structured:expect.objectContaining({document_kind:"idea_collection",contents:{items:expect.arrayContaining([expect.objectContaining({name:"Prompt Bleach"}),expect.objectContaining({name:"Dead Drop"})])}})}),expect.objectContaining({id:nativeId,ownership_kind:"project"})]));
     expect((await SELF.fetch(`${origin}/api/agent/documents/${source}`,{headers}).then(r=>r.json<any>())).document.content).toBe("first");expect((await SELF.fetch(`${origin}/api/agent/documents/${nativeId}`,{headers})).status).toBe(200);
     const outside=await create(other.cookie);expect((await SELF.fetch(`${origin}/api/agent/documents/${outside}`,{headers})).status).toBe(404);
     await SELF.fetch(`${origin}/api/projects/${projectId}/documents/${source}`,{method:"DELETE",headers:{cookie:owner.cookie,origin}});expect((await SELF.fetch(`${origin}/api/agent/documents/${source}`,{headers})).status).toBe(404);
@@ -764,51 +794,32 @@ describe("read-only machine access",()=>{
     expect(await env.DB.prepare(`SELECT lifecycle_state FROM projects WHERE id=?`).bind(projectId).first()).toEqual({lifecycle_state:"shell"});expect(await env.DB.prepare(`SELECT revoked_at FROM project_machine_credentials WHERE id=?`).bind(credential.credential.id).first()).toEqual({revoked_at:"2026-01-01T00:00:00.000Z"});expect((await SELF.fetch(`${origin}/api/agent/me`,{headers})).status).toBe(401);
   });
 
-  it("versions Agent compression independently and keeps revision alignment truthful",async()=>{
+  it("saves and exposes validated structured v3 compressions with truthful lifecycle state",async()=>{
     const alice=await participant("compression"),documentId=await create(alice.cookie);
-    const first=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>()),source=first.document.current_version_id;
-    const save=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:first.document.title,logicalPath:first.document.logical_path,visibility:first.document.visibility,compression:"Bound semantic text",sourceVersionId:source})});expect(save.status).toBe(200);
-    expect((await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document).toMatchObject({compression:"Bound semantic text",compression_source_version_id:source,compression_freshness:"current",compression_prompt_version:"compression-prompt-v2"});
-    await env.DB.prepare("UPDATE compression_revisions SET prompt_version='compression-prompt-v1' WHERE document_id=?").bind(documentId).run();
-    await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Metadata only",logicalPath:first.document.logical_path,visibility:first.document.visibility})});
-    expect((await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document.compression_freshness).toBe("current");
-    await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({content:"new full text",contentType:"text/markdown"})});
-    const stale=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(stale.document.compression_freshness).toBe("stale");
-    const conflict=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Must not commit",logicalPath:"must-not-commit.md",visibility:"public",compression:"wrong binding",sourceVersionId:source})});expect(conflict.status).toBe(409);
-    const afterConflict=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(afterConflict.document).toMatchObject({title:stale.document.title,logical_path:stale.document.logical_path,visibility:stale.document.visibility,compression:"Bound semantic text",compression_freshness:"stale"});
-    const refreshed=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:stale.document.title,logicalPath:stale.document.logical_path,visibility:stale.document.visibility,compression:"Fresh semantic text",sourceVersionId:stale.document.current_version_id})});expect(refreshed.status).toBe(200);
-    const history=await SELF.fetch(`${origin}/api/me/documents/${documentId}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(history.compressionRevisions).toHaveLength(2);expect(history.compressionRevisions.map((x:any)=>x.text)).toEqual(["Fresh semantic text","Bound semantic text"]);expect(history.compressionRevisions.map((x:any)=>x.prompt_version)).toEqual(["compression-prompt-v2","compression-prompt-v1"]);
+    const first=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>()),source=first.document.current_version_id,design=projection(source);
+    for(const compression of ["not json","x".repeat(2001),JSON.stringify({schema_version:1}),projection("wrong")]){const denied=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:first.document.title,logicalPath:first.document.logical_path,visibility:first.document.visibility,compression,sourceVersionId:source})});expect(denied.status).toBe(400);expect((await denied.json<any>()).error.message).toMatch(/compression|source_revision/)}
+    const save=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:first.document.title,logicalPath:first.document.logical_path,visibility:first.document.visibility,compression:design,sourceVersionId:source})});expect(save.status).toBe(200);
+    let read=(await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document;expect(read).toMatchObject({compression:design,compression_format:"structured-v3",compression_schema_version:1,compression_structured:{document_kind:"design_spec",source_revision:source},compression_freshness:"current",compression_prompt_version:"compression-prompt-v3"});
+    await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Metadata only",logicalPath:first.document.logical_path,visibility:first.document.visibility})});read=(await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document;expect(read.compression_freshness).toBe("current");
+    await SELF.fetch(`${origin}/api/me/documents/${documentId}`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({content:"new full text",contentType:"text/markdown"})});const stale=(await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>())).document;expect(stale.compression_freshness).toBe("stale");
+    const conflict=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Must not commit",logicalPath:"must-not-commit.md",visibility:"public",compression:design.replace("retrieval gist","changed retrieval gist"),sourceVersionId:source})});expect(conflict.status).toBe(409);
+    const ideas=projection(stale.current_version_id,"idea_collection",{items:[{name:"Prompt Bleach",kind:"hostile-input handling",gist:"Handles hostile retrieved input.",topics:["prompt injection"]},{name:"Dead Drop",kind:"agent communication",gist:"Supports agent-to-agent communication.",topics:["agents"]}]});
+    const refreshed=await SELF.fetch(`${origin}/api/me/documents/${documentId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:stale.title,logicalPath:stale.logical_path,visibility:stale.visibility,compression:ideas,sourceVersionId:stale.current_version_id})});expect(refreshed.status).toBe(200);
+    const history=await SELF.fetch(`${origin}/api/me/documents/${documentId}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(history.compressionRevisions).toHaveLength(2);expect(history.compressionRevisions[0].compression_structured.contents.items.map((x:any)=>x.name)).toEqual(["Prompt Bleach","Dead Drop"]);
   });
 
-  it("uses the durable v2 compression request and exposes the complete manual workflow in both editors",async()=>{
-    const expected=`Create a concise semantic compression of the document below for an AI agent that must decide whether the full document is relevant.
-
-Preserve:
-- the document’s main subject and purpose;
-- important entities, concepts, decisions, constraints, and unresolved questions;
-- distinctions or caveats that materially affect interpretation.
-
-Do not:
-- add information not present in the document;
-- turn it into a generic summary or prose introduction;
-- omit important limitations merely to make it shorter.
-
-Write compact factual prose intended for retrieval and triage, not for a human-facing abstract.
-
-The compression must not exceed 2,000 characters, including spaces.
-
-Return only the compression text, with no heading, commentary, or explanation.
-
-DOCUMENT TITLE:
-[document title]
-
-DOCUMENT:
-[full document text]`;
-    expect(COMPRESSION_PROMPT_VERSION).toBe("compression-prompt-v2");expect(COMPRESSION_PROMPT).toBe(expected);
-    expect(compressionRequest("Current title","Current full body")).toBe(expected.replace("[document title]","Current title").replace("[full document text]","Current full body"));
-    const alice=await participant("compression_ui"),documentId=await create(alice.cookie);
-    const projectId=await project(alice),nativeResponse=await native(projectId,alice,{title:"Native title",content:"Native full body",contentType:"text/plain"}),nativeId=(await nativeResponse.json<any>()).document.id;
-    for(const path of [`/documents/${documentId}`,`/project-documents/${nativeId}`]){const html=await SELF.fetch(origin+path,{headers:{cookie:alice.cookie}}).then(r=>r.text()),script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1]??"";expect(()=>new Function(script)).not.toThrow();expect(html).toContain("Maximum 2,000 characters, including spaces.");expect(script).toContain("navigator.clipboard.writeText(compressionPrompt.replace('[document title]',d.title).replace('[full document text]',d.content))");expect(script).toContain("addEventListener('input',count)");expect(script).toContain("value.length.toLocaleString()+' / 2,000'");expect(script).not.toContain("fetch("+"compressionPrompt");}
+  it("supports project-native v3, preserves legacy discrimination, and shares the canonical manual workflow",async()=>{
+    const alice=await participant("compression_ui"),documentId=await create(alice.cookie),owned=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());
+    const projectResponse=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Compression native",readAudience:"members_and_agents"})}),projectId=(await projectResponse.json<any>()).project.id;
+    const nativeResponse=await SELF.fetch(`${origin}/api/projects/${projectId}/native-documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Native title",logicalPath:"native-compression.md",content:"Native full body",contentType:"text/plain"})}),nativeId=(await nativeResponse.json<any>()).document.id,nativeRead=await SELF.fetch(`${origin}/api/project-documents/${nativeId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());
+    const nativeProjection=projection(nativeRead.document.current_version_id);const saved=await SELF.fetch(`${origin}/api/project-documents/${nativeId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Native title",logicalPath:nativeRead.document.logical_path,compression:nativeProjection,sourceVersionId:nativeRead.document.current_version_id})});expect(saved.status).toBe(200);
+    await env.DB.batch([env.DB.prepare(`INSERT INTO compression_revisions(id,document_id,revision_number,text,prompt_version,artifact_format) VALUES('legacy-v1',?,98,'old one','compression-prompt-v1','legacy-prose')`).bind(documentId),env.DB.prepare(`INSERT INTO compression_revisions(id,document_id,revision_number,text,prompt_version,artifact_format) VALUES('legacy-test',?,99,'{\"looks\":\"json\"}','compression-prompt-v2','legacy-prose')`).bind(documentId)]);
+    const legacy=await env.DB.prepare(`SELECT artifact_format,schema_version,artifact_json,text FROM compression_revisions WHERE id='legacy-test'`).first<any>();expect(legacy).toEqual({artifact_format:"legacy-prose",schema_version:null,artifact_json:null,text:'{"looks":"json"}'});expect((await env.DB.prepare(`SELECT text,prompt_version FROM compression_revisions WHERE id IN ('legacy-v1','legacy-test') ORDER BY revision_number`).all<any>()).results).toEqual([{text:"old one",prompt_version:"compression-prompt-v1"},{text:'{"looks":"json"}',prompt_version:"compression-prompt-v2"}]);
+    await env.DB.prepare(`UPDATE documents SET compression='{\"looks\":\"json\"}',selected_compression_revision_id='legacy-test' WHERE id=?`).bind(documentId).run();
+    const legacyDocument=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(legacyDocument.document).toMatchObject({compression:'{"looks":"json"}',compression_format:"legacy-prose",compression_schema_version:null,compression_structured:null,compression_freshness:"unknown"});
+    const legacyHistory=await SELF.fetch(`${origin}/api/me/documents/${documentId}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(legacyHistory.compressionRevisions).toEqual(expect.arrayContaining([expect.objectContaining({text:"old one",prompt_version:"compression-prompt-v1",compression_format:"legacy-prose",compression_structured:null}),expect.objectContaining({text:'{"looks":"json"}',prompt_version:"compression-prompt-v2",compression_format:"legacy-prose",compression_structured:null})]));
+    expect(COMPRESSION_PROMPT_VERSION).toBe("compression-prompt-v3");expect(compressionRequest("Current title","Current full body",owned.document.current_version_id)).toContain(`AUTHORITATIVE SOURCE REVISION ID:\n${owned.document.current_version_id}`);
+    for(const path of [`/documents/${documentId}`,`/project-documents/${nativeId}`]){const html=await SELF.fetch(origin+path,{headers:{cookie:alice.cookie}}).then(r=>r.text()),script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1]??"";expect(()=>new Function(script)).not.toThrow();expect(html).toContain("Structured v3");expect(html).toContain("Maximum 2,000 characters, including spaces.");expect(script).toContain("replaceAll('[source revision ID]',d.current_version_id)");expect(script).toContain("addEventListener('input',count)");expect(script).not.toContain("fetch("+"compressionPrompt");}
   });
 
 });
