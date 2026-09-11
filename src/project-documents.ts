@@ -36,20 +36,30 @@ export async function updateProjectDocument(request:Request,env:Env,p:Principal,
 
 export async function updateProjectDocumentMetadata(request:Request,env:Env,p:Principal,id:string){
   let v;try{v=await readJson(request)}catch(e){return bad((e as Error).message)}
-  if(typeof v.title!=="string"||!v.title.trim()||v.title.length>200||typeof v.logicalPath!=="string"||!v.logicalPath.trim()||v.logicalPath.length>500||!(v.compression===undefined||v.compression===null||typeof v.compression==="string"))return bad("title, logicalPath, or compression is invalid");
+  if(typeof v.title!=="string"||!v.title.trim()||v.title.length>200||typeof v.logicalPath!=="string"||!v.logicalPath.trim()||v.logicalPath.length>500)return bad("title or logicalPath is invalid");
   const before=await env.DB.prepare(`SELECT title,logical_path,compression,owner_id,current_version_id FROM documents WHERE id=? AND owner_type='project'`).bind(id).first<{title:string;logical_path:string;compression:string|null;owner_id:string;current_version_id:string}>();if(!before)return problem(404,"not_found","Document not found");
-  const compression=v.compression===undefined?before.compression:v.compression===""?null:v.compression,compressionChanged=compression!==before.compression,sourceVersionId=v.sourceVersionId===undefined?before.current_version_id:v.sourceVersionId;
-  if(compressionChanged&&compression!==null){const validation=validateCompression(compression,sourceVersionId);if("error" in validation)return problem(400,"invalid_compression",validation.error)}
+  const submittedCompression=v.compression;
+  let compression:string|null;
+  if(submittedCompression===undefined)compression=before.compression;
+  else if(submittedCompression===null||submittedCompression==="")compression=null;
+  else if(typeof submittedCompression==="string")compression=submittedCompression;
+  else return bad("compression must be a JSON string or null");
+  const compressionChanged=compression!==before.compression,sourceVersionId=v.sourceVersionId===undefined?before.current_version_id:v.sourceVersionId;
+  const compressionSourceVersionId=compressionChanged&&typeof sourceVersionId==="string"?sourceVersionId:null;
+  if(compressionChanged&&compressionSourceVersionId===null)return bad("sourceVersionId is required when saving compression");
+  if(compressionChanged&&compression!==null){const validation=validateCompression(compression,compressionSourceVersionId);if("error" in validation)return problem(400,"invalid_compression",validation.error)}
   const now=new Date().toISOString(),changes=JSON.stringify({title:{previous:before.title,new:v.title.trim()},logicalPath:{previous:before.logical_path,new:v.logicalPath.trim()},...(compressionChanged?{compressionRevision:{previous:null,new:"created"}}:{})});
   const authorization="d.owner_type='project' AND EXISTS(SELECT 1 FROM projects x JOIN project_members m ON m.project_id=x.id JOIN participants a ON a.id=m.participant_id WHERE x.id=d.owner_id AND x.lifecycle_state='active' AND m.participant_id=? AND a.account_state!='deleted' AND (a.deletion_due_at IS NULL OR a.deletion_due_at>?))";
   try{
-    const save=compressionChanged?saveCompressionStatements(env,{documentId:id,text:compression as string|null,sourceVersionId,actorId:p.participantId,authorizeSql:authorization,authorizeBindings:[p.participantId,now]}):null;
-    const results=await env.DB.batch(compressionChanged?[
-      ...save!.statements,
-      env.DB.prepare(`UPDATE documents AS d SET title=?,logical_path=? WHERE id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?) AND (${authorization})`).bind(v.title.trim(),v.logicalPath.trim(),id,sourceVersionId,save!.id,save!.id,p.participantId,now),
-      env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) SELECT ?,?,'metadata_changed','human',?,?,? WHERE EXISTS(SELECT 1 FROM documents d WHERE d.id=? AND d.current_version_id=? AND ((? IS NULL AND d.selected_compression_revision_id IS NULL) OR d.selected_compression_revision_id=?) AND (${authorization}))`).bind(opaque("dev"),id,p.participantId,changes,now,id,sourceVersionId,save!.id,save!.id,p.participantId,now),
-      env.DB.prepare(`INSERT INTO project_events(id,project_id,event_type,actor_participant_id,details_json,created_at) SELECT ?,?,'native_document_edited',?,?,? WHERE EXISTS(SELECT 1 FROM documents WHERE id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?))`).bind(opaque("pev"),before.owner_id,p.participantId,JSON.stringify({documentId:id,metadata:true}),now,id,sourceVersionId,save!.id,save!.id),
-    ]:[
+    let results;
+    const save=compressionSourceVersionId===null?null:saveCompressionStatements(env,{documentId:id,text:compression,sourceVersionId:compressionSourceVersionId,actorId:p.participantId,authorizeSql:authorization,authorizeBindings:[p.participantId,now]});
+    if(save){
+      results=await env.DB.batch([
+      ...save.statements,
+      env.DB.prepare(`UPDATE documents AS d SET title=?,logical_path=? WHERE id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?) AND (${authorization})`).bind(v.title.trim(),v.logicalPath.trim(),id,compressionSourceVersionId,save.id,save.id,p.participantId,now),
+      env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) SELECT ?,?,'metadata_changed','human',?,?,? WHERE EXISTS(SELECT 1 FROM documents d WHERE d.id=? AND d.current_version_id=? AND ((? IS NULL AND d.selected_compression_revision_id IS NULL) OR d.selected_compression_revision_id=?) AND (${authorization}))`).bind(opaque("dev"),id,p.participantId,changes,now,id,compressionSourceVersionId,save.id,save.id,p.participantId,now),
+      env.DB.prepare(`INSERT INTO project_events(id,project_id,event_type,actor_participant_id,details_json,created_at) SELECT ?,?,'native_document_edited',?,?,? WHERE EXISTS(SELECT 1 FROM documents WHERE id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?))`).bind(opaque("pev"),before.owner_id,p.participantId,JSON.stringify({documentId:id,metadata:true}),now,id,compressionSourceVersionId,save.id,save.id),
+    ]);}else results=await env.DB.batch([
       env.DB.prepare(`UPDATE documents AS d SET title=?,logical_path=? WHERE id=? AND (${authorization})`).bind(v.title.trim(),v.logicalPath.trim(),id,p.participantId,now),
       env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) SELECT ?,?,'metadata_changed','human',?,?,? WHERE changes()=1`).bind(opaque("dev"),id,p.participantId,changes,now),
       env.DB.prepare(`INSERT INTO project_events(id,project_id,event_type,actor_participant_id,details_json,created_at) SELECT ?,?,'native_document_edited',?,?,? WHERE changes()=1`).bind(opaque("pev"),before.owner_id,p.participantId,JSON.stringify({documentId:id,metadata:true}),now),

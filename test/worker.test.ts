@@ -3,11 +3,29 @@ import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { DEV_PARTICIPANT_ID, DEV_USER_ID } from "../src/dev-auth";
-import { COMPRESSION_PROMPT, COMPRESSION_PROMPT_VERSION, compressionRequest } from "../src/compression";
+import { COMPRESSION_PROMPT, COMPRESSION_PROMPT_VERSION, compressionRequest, validateCompression } from "../src/compression";
 
 const origin = "http://example.com";
 
 const projection=(source:string,kind="design_spec",contents:Record<string,unknown>={key_points:["Important point"]})=>JSON.stringify({schema_version:1,source_revision:source,document_kind:kind,gist:"A source-grounded retrieval gist.",topics:["retrieval"],contents});
+
+it("validates restrained document-sensitive v3 payload shapes",()=>{
+  const source="ver_validation";
+  for(const [kind,contents] of [
+    ["design_spec",{decisions:[]}],
+    ["meeting",{actions:[]}],
+    ["incident_report",{observations:[],interpretations:[]}],
+    ["reference",{facts:[]}],
+    ["general",{summary_points:["Grounded point"]}]
+  ] as const)expect(validateCompression(projection(source,kind,contents),source)).not.toHaveProperty("error");
+  for(const [kind,contents] of [
+    ["design_spec",{constraints:"not an array"}],
+    ["meeting",{actions:{owner:"Alice"}}],
+    ["incident_report",{events:"not an array"}],
+    ["reference",{caveats:false}],
+    ["general",{" ":[]}]
+  ] as const)expect(validateCompression(projection(source,kind,contents),source)).toHaveProperty("error");
+});
 
 async function sha256(value: string): Promise<string> {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -100,7 +118,7 @@ describe("local development authentication", () => {
 });
 
 describe("migration upgrade safety",()=>{
-  it("preserves existing corpus state and makes existing machine credentials read-only",()=>{const result=(globalThis as typeof globalThis & {__loomMigrationRegression:{before:unknown;after:unknown;afterProjectDeletionMigration:unknown;migratedCredential:unknown;foreignKeyErrors:unknown[]}}).__loomMigrationRegression;expect(result.after).toEqual(result.before);expect(result.afterProjectDeletionMigration).toEqual(result.before);expect(result.migratedCredential).toEqual({id:"mac_migration",checkin_enabled:0});expect(result.foreignKeyErrors).toEqual([])})
+  it("preserves existing corpus state while migrating machine credentials and legacy compression",()=>{const result=(globalThis as typeof globalThis & {__loomMigrationRegression:{before:unknown;after:unknown;afterProjectDeletionMigration:unknown;migratedCredential:unknown;migratedProseCompression:unknown;migratedStructuredColumns:unknown;foreignKeyErrors:unknown[]}}).__loomMigrationRegression;expect(result.after).toEqual(result.before);expect(result.afterProjectDeletionMigration).toEqual(result.before);expect(result.migratedCredential).toEqual({id:"mac_migration",checkin_enabled:0});expect(result.migratedProseCompression).toMatchObject({id:"cmp_legacy_doc_migration",text:"Historical prose compression",source_version_id:null,actor_type:null,actor_id:null,created_at:null,prompt_version:null});expect(result.migratedStructuredColumns).toEqual({text:"Historical prose compression",prompt_version:null,artifact_format:"legacy-prose",schema_version:null,artifact_json:null});expect(result.foreignKeyErrors).toEqual([])})
 });
 
 async function invite(projectId:string, inviter:{cookie:string}, recipient:{cookie:string}) {
@@ -782,10 +800,14 @@ describe("read-only machine access",()=>{
 
   it("supports project-native v3, preserves legacy discrimination, and shares the canonical manual workflow",async()=>{
     const alice=await participant("compression_ui"),documentId=await create(alice.cookie),owned=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());
-    const projectId=await project(alice),nativeResponse=await native(projectId,alice,{title:"Native title",content:"Native full body",contentType:"text/plain"}),nativeId=(await nativeResponse.json<any>()).document.id,nativeRead=await SELF.fetch(`${origin}/api/project-documents/${nativeId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());
+    const projectResponse=await SELF.fetch(`${origin}/api/projects`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({name:"Compression native",readAudience:"members_and_agents"})}),projectId=(await projectResponse.json<any>()).project.id;
+    const nativeResponse=await SELF.fetch(`${origin}/api/projects/${projectId}/native-documents`,{method:"POST",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Native title",logicalPath:"native-compression.md",content:"Native full body",contentType:"text/plain"})}),nativeId=(await nativeResponse.json<any>()).document.id,nativeRead=await SELF.fetch(`${origin}/api/project-documents/${nativeId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());
     const nativeProjection=projection(nativeRead.document.current_version_id);const saved=await SELF.fetch(`${origin}/api/project-documents/${nativeId}/metadata`,{method:"PUT",headers:{cookie:alice.cookie,origin,"content-type":"application/json"},body:JSON.stringify({title:"Native title",logicalPath:nativeRead.document.logical_path,compression:nativeProjection,sourceVersionId:nativeRead.document.current_version_id})});expect(saved.status).toBe(200);
     await env.DB.batch([env.DB.prepare(`INSERT INTO compression_revisions(id,document_id,revision_number,text,prompt_version,artifact_format) VALUES('legacy-v1',?,98,'old one','compression-prompt-v1','legacy-prose')`).bind(documentId),env.DB.prepare(`INSERT INTO compression_revisions(id,document_id,revision_number,text,prompt_version,artifact_format) VALUES('legacy-test',?,99,'{\"looks\":\"json\"}','compression-prompt-v2','legacy-prose')`).bind(documentId)]);
     const legacy=await env.DB.prepare(`SELECT artifact_format,schema_version,artifact_json,text FROM compression_revisions WHERE id='legacy-test'`).first<any>();expect(legacy).toEqual({artifact_format:"legacy-prose",schema_version:null,artifact_json:null,text:'{"looks":"json"}'});expect((await env.DB.prepare(`SELECT text,prompt_version FROM compression_revisions WHERE id IN ('legacy-v1','legacy-test') ORDER BY revision_number`).all<any>()).results).toEqual([{text:"old one",prompt_version:"compression-prompt-v1"},{text:'{"looks":"json"}',prompt_version:"compression-prompt-v2"}]);
+    await env.DB.prepare(`UPDATE documents SET compression='{\"looks\":\"json\"}',selected_compression_revision_id='legacy-test' WHERE id=?`).bind(documentId).run();
+    const legacyDocument=await SELF.fetch(`${origin}/api/documents/${documentId}`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(legacyDocument.document).toMatchObject({compression:'{"looks":"json"}',compression_format:"legacy-prose",compression_schema_version:null,compression_structured:null,compression_freshness:"unknown"});
+    const legacyHistory=await SELF.fetch(`${origin}/api/me/documents/${documentId}/versions`,{headers:{cookie:alice.cookie}}).then(r=>r.json<any>());expect(legacyHistory.compressionRevisions).toEqual(expect.arrayContaining([expect.objectContaining({text:"old one",prompt_version:"compression-prompt-v1",compression_format:"legacy-prose",compression_structured:null}),expect.objectContaining({text:'{"looks":"json"}',prompt_version:"compression-prompt-v2",compression_format:"legacy-prose",compression_structured:null})]));
     expect(COMPRESSION_PROMPT_VERSION).toBe("compression-prompt-v3");expect(compressionRequest("Current title","Current full body",owned.document.current_version_id)).toContain(`AUTHORITATIVE SOURCE REVISION ID:\n${owned.document.current_version_id}`);
     for(const path of [`/documents/${documentId}`,`/project-documents/${nativeId}`]){const html=await SELF.fetch(origin+path,{headers:{cookie:alice.cookie}}).then(r=>r.text()),script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1]??"";expect(()=>new Function(script)).not.toThrow();expect(html).toContain("Structured v3");expect(html).toContain("Maximum 2,000 characters, including spaces.");expect(script).toContain("replaceAll('[source revision ID]',d.current_version_id)");expect(script).toContain("addEventListener('input',count)");expect(script).not.toContain("fetch("+"compressionPrompt");}
   });

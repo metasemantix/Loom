@@ -54,11 +54,22 @@ export function validateCompression(value:unknown, sourceVersionId:unknown):{tex
   if(typeof a.gist!=="string"||!a.gist.trim())return {error:"compression gist must be a non-empty string"};
   if(!Array.isArray(a.topics)||a.topics.some(x=>typeof x!=="string"))return {error:"compression topics must be an array of strings"};
   if(!a.contents||typeof a.contents!=="object"||Array.isArray(a.contents))return {error:"compression contents must be an object"};
-  if(a.document_kind==="idea_collection"){
-    const items=(a.contents as Record<string,unknown>).items;
-    if(!Array.isArray(items))return {error:"idea_collection contents.items must be an array"};
-    for(const item of items){if(!item||typeof item!=="object"||Array.isArray(item))return {error:"each idea_collection item must be an object"};const i=item as Record<string,unknown>;if(typeof i.name!=="string"||typeof i.kind!=="string"||typeof i.gist!=="string"||!Array.isArray(i.topics)||i.topics.some(x=>typeof x!=="string"))return {error:"each idea_collection item requires string name, kind, gist, and string-array topics"}}
+  const contents=a.contents as Record<string,unknown>;
+  const arrayFields:Record<string,string[]>={
+    design_spec:["decisions","constraints","open_questions","key_points"],
+    meeting:["decisions","actions","unresolved_matters"],
+    incident_report:["events","observations","interpretations","unresolved_matters"],
+    reference:["entities","facts","caveats"]
+  };
+  for(const field of arrayFields[a.document_kind]??[]){
+    if(field in contents&&!Array.isArray(contents[field]))return {error:`${a.document_kind} contents.${field} must be an array when present`};
   }
+  if(a.document_kind==="idea_collection"){
+    const items=contents.items;
+    if(!Array.isArray(items))return {error:"idea_collection contents.items must be an array"};
+    for(const item of items){if(!item||typeof item!=="object"||Array.isArray(item))return {error:"each idea_collection item must be an object"};const i=item as Record<string,unknown>;if(typeof i.name!=="string"||!i.name.trim()||typeof i.kind!=="string"||!i.kind.trim()||typeof i.gist!=="string"||!i.gist.trim()||!Array.isArray(i.topics)||i.topics.some(x=>typeof x!=="string"))return {error:"each idea_collection item requires non-empty string name, kind, gist, and string-array topics"}}
+  }
+  if(a.document_kind==="general"&&Object.keys(contents).some(key=>!key.trim()))return {error:"general contents field names must be non-empty"};
   return {text:value,artifact:a as Projection};
 }
 

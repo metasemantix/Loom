@@ -128,14 +128,21 @@ export async function updateDocument(request: Request, env: Env, principal: Prin
 export async function updateMetadata(request: Request, env: Env, principal: Principal, id: string): Promise<Response> {
   const document = await ownedDocument(env, principal, id); if (!document) return problem(404, "not_found", "Document not found");
   let body; try { body = await readJson(request); } catch (error) { return problem(400, "invalid_request", (error as Error).message); }
-  const compression=body.compression===undefined?document.compression:body.compression===null||body.compression===""?null:body.compression;
+  const submittedCompression=body.compression;
+  let compression:string|null;
+  if(submittedCompression===undefined)compression=document.compression;
+  else if(submittedCompression===null||submittedCompression==="")compression=null;
+  else if(typeof submittedCompression==="string")compression=submittedCompression;
+  else return problem(400,"invalid_request","compression must be a JSON string or null");
   const next = { title: body.title ?? document.title, logical_path: body.logicalPath ?? document.logical_path, visibility: body.visibility ?? document.visibility,compression };
   if (typeof next.title !== "string" || !next.title.trim() || next.title.length > 120) return problem(400, "invalid_request", "title must be between 1 and 120 characters");
   if (!validPath(next.logical_path)) return problem(400, "invalid_request", "logicalPath must be a valid relative path");
   if (typeof next.visibility !== "string" || !VISIBILITIES.has(next.visibility)) return problem(400, "invalid_request", "unsupported visibility");
   const compressionChanged=next.compression!==document.compression;
   const sourceVersionId=body.sourceVersionId===undefined?document.current_version_id:body.sourceVersionId;
-  if(compressionChanged&&next.compression!==null){const validation=validateCompression(next.compression,sourceVersionId);if("error" in validation)return problem(400,"invalid_compression",validation.error)}
+  const compressionSourceVersionId=compressionChanged&&typeof sourceVersionId==="string"?sourceVersionId:null;
+  if(compressionChanged&&compressionSourceVersionId===null)return problem(400,"invalid_request","sourceVersionId is required when saving compression");
+  if(compressionChanged&&next.compression!==null){const validation=validateCompression(next.compression,compressionSourceVersionId);if("error" in validation)return problem(400,"invalid_compression",validation.error)}
   const changes: Record<string, { previous: string|null; new: string|null }> = {};
   if (next.title.trim() !== document.title) changes.title = { previous: document.title, new: next.title.trim() };
   if (next.logical_path !== document.logical_path) changes.logicalPath = { previous: document.logical_path, new: next.logical_path };
@@ -144,16 +151,18 @@ export async function updateMetadata(request: Request, env: Env, principal: Prin
   if (!Object.keys(changes).length) return json({ document: { id, ...next }, changed: false });
   const now = new Date().toISOString();
   try {
-    const compressionSave=compressionChanged?saveCompressionStatements(env,{documentId:id,text:next.compression,sourceVersionId,actorId:principal.userId,authorizeSql:"d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL",authorizeBindings:[principal.participantId]}):null;
-    const results=await env.DB.batch(compressionChanged ? [
-      ...compressionSave!.statements,
-      env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=? WHERE id=? AND owner_id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?)`).bind(next.title.trim(),next.logical_path,next.visibility,id,principal.participantId,sourceVersionId,compressionSave!.id,compressionSave!.id),
-      env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) SELECT ?,?,'metadata_changed','human',?,?,? WHERE EXISTS(SELECT 1 FROM documents WHERE id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?))`).bind(opaque("evt"),id,principal.userId,JSON.stringify(changes),now,id,sourceVersionId,compressionSave!.id,compressionSave!.id),
-    ] : [
+    const compressionSave=compressionSourceVersionId===null?null:saveCompressionStatements(env,{documentId:id,text:next.compression,sourceVersionId:compressionSourceVersionId,actorId:principal.userId,authorizeSql:"d.owner_type='participant' AND d.owner_id=? AND d.deleted_at IS NULL",authorizeBindings:[principal.participantId]});
+    if(compressionSave){
+      const results=await env.DB.batch([
+        ...compressionSave.statements,
+        env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=? WHERE id=? AND owner_id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?)`).bind(next.title.trim(),next.logical_path,next.visibility,id,principal.participantId,compressionSourceVersionId,compressionSave.id,compressionSave.id),
+        env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) SELECT ?,?,'metadata_changed','human',?,?,? WHERE EXISTS(SELECT 1 FROM documents WHERE id=? AND current_version_id=? AND ((? IS NULL AND selected_compression_revision_id IS NULL) OR selected_compression_revision_id=?))`).bind(opaque("evt"),id,principal.userId,JSON.stringify(changes),now,id,compressionSourceVersionId,compressionSave.id,compressionSave.id),
+      ]);
+      if(!results[0]?.meta.changes)return problem(409,"document_version_conflict","The document changed since this compression was prepared");
+    }else await env.DB.batch([
       env.DB.prepare(`UPDATE documents SET title=?,logical_path=?,visibility=? WHERE id=? AND owner_id=?`).bind(next.title.trim(),next.logical_path,next.visibility,id,principal.participantId),
       env.DB.prepare(`INSERT INTO document_events(id,document_id,event_type,actor_type,actor_id,changes_json,created_at) VALUES(?,?,'metadata_changed','human',?,?,?)`).bind(opaque("evt"),id,principal.userId,JSON.stringify(changes),now),
     ]);
-    if(compressionChanged&&!results[0]?.meta.changes)return problem(409,"document_version_conflict","The document changed since this compression was prepared");
   } catch { return problem(409, "path_conflict", "That logical path is already in use"); }
   return json({ document: { id, title: next.title.trim(), logicalPath: next.logical_path, visibility: next.visibility }, changed: true });
 }
