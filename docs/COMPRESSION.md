@@ -32,6 +32,17 @@ THREAD or another derived-knowledge layer
 
 Compression is therefore best understood as a lossy semantic index/projection of one source revision, not merely shorter document text.
 
+## Size policy
+
+Compression v3 has two deliberately different size values:
+
+- **4,000 characters** is the preferred generation target and normal compression budget. Prefer the smallest complete semantic projection, and do not add detail merely because more space is available.
+- **8,000 characters** is the absolute storage and validation maximum, including the complete JSON envelope.
+
+Structured JSON has nontrivial envelope and payload overhead. Heterogeneous documents such as `idea_collection` may genuinely need more than the normal budget to keep independently discoverable, source-grounded items and materially important distinctions intact. The larger hard maximum is safety headroom against structural loss and truncated JSON, not an invitation to verbose compression. A projection may exceed 4,000 characters when preserving that meaning requires it, but it must never meet the preferred target by truncating JSON, dropping required structure, collapsing independent items into generic prose, or omitting distinctions that materially affect retrieval.
+
+Even when it uses the available headroom, compression remains a pre-reading routing layer rather than a replacement for full-document retrieval.
+
 ## Canonical artifact
 
 From v3 onward, the canonical compression artifact is structured JSON. A compact natural-language `gist` remains mandatory because prose is useful for embeddings, semantic matching, and fast human inspection, but important distinctions should not require a consumer to reconstruct structure from prose.
@@ -202,7 +213,9 @@ The v3 prompt must instruct the model to:
 - add no information or interpretation not present in the source;
 - avoid downstream synthesis, judgment, cross-document reasoning, or reusable knowledge extraction;
 - bind the projection to the supplied source revision ID;
-- stay within the existing storage/validation limit unless and until that limit is explicitly revised by a later contract.
+- aim for 4,000 characters or fewer without padding or unnecessary detail;
+- exceed that target only when needed to preserve independently meaningful items, important distinctions, or source-grounded structure; and
+- stay within the absolute 8,000-character storage and validation maximum, including the complete JSON envelope, without truncating JSON or sacrificing required semantic structure merely to meet the soft target.
 
 The copy action remains clipboard-only convenience. It may include the current document title, source revision ID, and full document text in the ready-to-paste request. Loom must not transmit this payload to a model/provider merely because the user clicked Copy.
 

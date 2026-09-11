@@ -11,6 +11,7 @@ import agentReadAccess from "../migrations/0009_agent_read_access.sql?raw";
 import agentCheckins from "../migrations/0010_agent_checkins.sql?raw";
 import compressionRevisions from "../migrations/0011_compression_revisions.sql?raw";
 import structuredCompression from "../migrations/0012_structured_compression_v3.sql?raw";
+import expandedCompressionSize from "../migrations/0013_expand_compression_size.sql?raw";
 
 function statements(sql:string){const result:string[]=[],lines:string[]=[],flush=()=>{const value=lines.join("\n").trim().replace(/;$/,"");lines.length=0;if(value)result.push(value)};let trigger=false;for(const line of sql.split("\n")){if(/^CREATE TRIGGER\b/.test(line.trim()))trigger=true;lines.push(line);if(trigger?/^END;$/.test(line.trim()):line.trim().endsWith(";")){flush();trigger=false}}flush();return result}
 async function apply(sql:string){for(const statement of statements(sql))await env.DB.prepare(statement).run()}
@@ -51,5 +52,12 @@ await apply(compressionRevisions);
 const migratedProseCompression=await env.DB.prepare(`SELECT id,text,source_version_id,actor_type,actor_id,created_at,prompt_version,migrated_at FROM compression_revisions WHERE document_id='doc_migration'`).first();
 await apply(structuredCompression);
 const migratedStructuredColumns=await env.DB.prepare(`SELECT text,prompt_version,artifact_format,schema_version,artifact_json FROM compression_revisions WHERE document_id='doc_migration'`).first();
+const structuredArtifact=JSON.stringify({schema_version:1,source_revision:"ver_migration_2",document_kind:"idea_collection",gist:"A heterogeneous set of independently useful migration ideas.",topics:["migration","retrieval"],contents:{items:[{name:"Constraint-preserving rebuild",kind:"database migration",gist:"Rebuilds a constrained SQLite table while preserving identity and provenance.",topics:["sqlite","constraints"]},{name:"Structured retrieval",kind:"semantic projection",gist:"Keeps independent ideas discoverable in a structured artifact.",topics:["compression","retrieval"]}]}});
+await env.DB.prepare(`INSERT INTO compression_revisions(id,document_id,revision_number,text,source_version_id,actor_type,actor_id,created_at,prompt_version,migrated_at,artifact_format,schema_version,artifact_json) VALUES('cmp_structured_migration','doc_migration',2,?,'ver_migration_2','human','usr_migration',?,'compression-prompt-v3',NULL,'structured-v3',1,?)`).bind(structuredArtifact,at,structuredArtifact).run();
+await env.DB.prepare(`UPDATE documents SET compression=?,selected_compression_revision_id='cmp_structured_migration' WHERE id='doc_migration'`).bind(structuredArtifact).run();
+const compressionRowsBeforeExpansion=(await env.DB.prepare(`SELECT * FROM compression_revisions WHERE document_id='doc_migration' ORDER BY revision_number`).all()).results;
+await apply(expandedCompressionSize);
+const compressionRowsAfterExpansion=(await env.DB.prepare(`SELECT * FROM compression_revisions WHERE document_id='doc_migration' ORDER BY revision_number`).all()).results;
+const selectedCompressionAfterExpansion=await env.DB.prepare(`SELECT selected_compression_revision_id FROM documents WHERE id='doc_migration'`).first();
 const foreignKeyErrors=(await env.DB.prepare(`PRAGMA foreign_key_check`).all()).results;
-(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,migratedProseCompression,migratedStructuredColumns,foreignKeyErrors};
+(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,migratedProseCompression,migratedStructuredColumns,compressionRowsBeforeExpansion,compressionRowsAfterExpansion,selectedCompressionAfterExpansion,foreignKeyErrors};
