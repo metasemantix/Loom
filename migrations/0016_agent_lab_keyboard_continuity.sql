@@ -1,5 +1,5 @@
 -- Continue keyboard capability chains across multiple ordered messages.
-PRAGMA foreign_keys = OFF;
+PRAGMA defer_foreign_keys = ON;
 
 ALTER TABLE agent_lab_keyboard_events RENAME TO agent_lab_keyboard_events_0015;
 ALTER TABLE agent_lab_keyboard_capabilities RENAME TO agent_lab_keyboard_capabilities_0015;
@@ -59,5 +59,4 @@ SELECT id,chain_id,message_id,capability_id,operation,outcome,symbol_count,creat
 DROP TABLE agent_lab_keyboard_events_0015;
 DROP TABLE agent_lab_keyboard_capabilities_0015;
 DROP TABLE agent_lab_keyboard_messages_0015;
-PRAGMA foreign_keys = ON;
 PRAGMA foreign_key_check;

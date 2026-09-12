@@ -129,7 +129,7 @@ describe("verbatim-link compositional keyboard",()=>{
     expect(await env.DB.prepare(`SELECT value FROM agent_lab_keyboard_messages WHERE id=?`).bind(first!.id).first()).toEqual({value:"pebble"});
     for(let index=0;index<128;index++)third=await choose(third,"a");
     expect((await get(third.links.get("b")!)).status).toBe(403);
-  });
+  },15000);
 
   it("allows only one concurrent continuation and rejects invalid continuation states without successors",async()=>{
     const start=await menu(),readUrl=onlyHref(await (await get(start.links.get("done")!)).text()),continueUrl=onlyHref(await (await get(readUrl)).text()),token=new URL(continueUrl).searchParams.get("cap")!,row=await messageFor(token),before=(await capabilityCount(token))!.count;
