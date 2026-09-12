@@ -10,6 +10,14 @@ function text(body:string,status=200):Response {
   return new Response(body,{status,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}});
 }
 
+function html(body:string):Response {
+  return new Response(body,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
+}
+
+function escapeHtml(value:string):string {
+  return value.replace(/[&<>"']/g,character=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[character]!);
+}
+
 function absolute(request:Request,path:string,parameters:Record<string,string>):string {
   const next=new URL(path,new URL(request.url).origin);
   for(const [name,value] of Object.entries(parameters))next.searchParams.set(name,value);
@@ -83,8 +91,8 @@ type KeyboardOperation="choose"|"read";
 type KeyboardCapabilityRow=CapabilityRow&{message_id:string;symbol_count:number|null;completed_at:string|null};
 
 function keyboardMenu(request:Request,value:string,capability:string):Response {
-  const choices=keyboardChoices.map(choice=>`${choice}: ${absolute(request,"/agent-lab/keyboard/choose",{cap:capability,choice})}`).join("\n");
-  return text(`value:\n${value}\n\n${choices}\n`);
+  const choices=keyboardChoices.map(choice=>`<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/choose",{cap:capability,choice}))}">${escapeHtml(choice)}</a>`).join("\n");
+  return html(`<!doctype html>\n<meta charset="utf-8">\n<pre id="value">${escapeHtml(value)}</pre>\n<nav>\n${choices}\n</nav>\n`);
 }
 
 async function rejectKeyboard(env:Env,operation:KeyboardOperation,raw:string|null,messageId?:string,validCapabilityOutcome?:string):Promise<Response> {
@@ -133,7 +141,7 @@ export async function chooseAgentLabKeyboard(request:Request,env:Env):Promise<Re
     if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"choose",capability);
     const message=await env.DB.prepare(`SELECT id FROM agent_lab_keyboard_messages WHERE id=(SELECT message_id FROM agent_lab_keyboard_capabilities WHERE consumption_id=?)`).bind(consumptionId).first<{id:string}>();
     if(!message)throw new Error("Completed keyboard capability has no message");
-    return text(`read: ${absolute(request,"/agent-lab/keyboard/read",{cap:next,id:message.id})}\n`);
+    return html(`<!doctype html>\n<meta charset="utf-8">\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/read",{cap:next,id:message.id}))}">read</a>\n`);
   }
   const symbol=choice==="space"?" ":choice;
   const results=await env.DB.batch([
