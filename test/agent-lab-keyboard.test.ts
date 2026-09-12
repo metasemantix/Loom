@@ -95,6 +95,19 @@ describe("verbatim-link compositional keyboard",()=>{
     expect((await env.DB.prepare(`SELECT count(*) count FROM agent_lab_keyboard_capabilities`).first<{count:number}>())!.count).toBe(before);
   });
 
+  it("never persists caller-supplied read IDs in rejection events",async()=>{
+    const attackerId=`attacker-controlled-${crypto.randomUUID()}`;
+    expect((await get(`/agent-lab/keyboard/read?cap=bad&id=${attackerId}`)).status).toBe(403);
+    expect((await get(`/agent-lab/keyboard/read?cap=labkey_${"0".repeat(36)}&id=${attackerId}`)).status).toBe(403);
+    const unresolved=(await env.DB.prepare(`SELECT message_id,outcome FROM agent_lab_keyboard_events WHERE operation='read' ORDER BY rowid DESC LIMIT 2`).all<{message_id:string|null;outcome:string}>()).results;
+    expect(unresolved.map(event=>event.outcome)).toEqual(["unknown","malformed"]);expect(unresolved.every(event=>event.message_id===null)).toBe(true);expect(JSON.stringify(unresolved)).not.toContain(attackerId);
+
+    const owner=await menu(),foreign=await menu(),actualMessage=await messageFor(cap(owner)),foreignMessage=await messageFor(cap(foreign)),done=await get(owner.links.get("done")!),readUrl=new URL((await done.text()).match(/^read: (\S+)$/m)![1]),readRaw=readUrl.searchParams.get("cap")!;
+    readUrl.searchParams.set("id",foreignMessage!.id);expect((await get(readUrl.toString())).status).toBe(403);
+    const rejected=await env.DB.prepare(`SELECT e.message_id,e.outcome FROM agent_lab_keyboard_events e JOIN agent_lab_keyboard_capabilities c ON c.id=e.capability_id WHERE c.token_hash=? ORDER BY e.rowid DESC LIMIT 1`).bind(await hashSecret(readRaw)).first<{message_id:string;outcome:string}>();
+    expect(rejected).toEqual({message_id:actualMessage!.id,outcome:"wrong_chain"});expect(rejected?.message_id).not.toBe(foreignMessage!.id);
+  });
+
   it("never persists raw capabilities or message content in events and preserves isolation",async()=>{
     let current=await menu();current=await choose(current,"p");const choiceToken=cap(current),done=await get(current.links.get("done")!),readUrl=(await done.text()).match(/^read: (\S+)$/m)![1],readToken=new URL(readUrl).searchParams.get("cap")!;await get(readUrl);
     const capabilities=JSON.stringify((await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_capabilities`).all()).results),events=JSON.stringify((await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_events`).all()).results);

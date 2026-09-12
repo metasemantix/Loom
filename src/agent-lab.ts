@@ -103,7 +103,7 @@ async function rejectKeyboard(env:Env,operation:KeyboardOperation,raw:string|nul
     else outcome="wrong_state";
   }
   await env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) VALUES(?,?,?,?,?,?,?,?)`)
-    .bind(opaque("ake"),row?.chain_id??null,messageId??row?.message_id??null,row?.id??null,operation,outcome,row?.symbol_count??null,at).run();
+    .bind(opaque("ake"),row?.chain_id??null,row?.message_id??null,row?.id??null,operation,outcome,row?.symbol_count??null,at).run();
   return text("Capability rejected.\n",403);
 }
 
