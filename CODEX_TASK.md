@@ -1,258 +1,179 @@
 # Current Codex Task
 
-Implement Slice 2, the verbatim-link compositional keyboard defined in `docs/AGENT_GET_CAPABILITY_EXPERIMENT.md`.
+Implement Slice 2b of the experimental Loom agent keyboard: preserve the existing capability-chain keyboard protocol and replace its plain-text action-URL presentation with minimal page-native HTML hyperlinks.
 
-Read and follow `AGENTS.md`, `docs/TESTING_MODEL.md`, the normative experiment specification in `docs/AGENT_GET_CAPABILITY_EXPERIMENT.md`, and `docs/AGENT_ACCESS.md`. Treat the current repository as source of truth. Preserve the already deployed Slice 1 `/agent-lab/enter -> write -> read` behavior.
+Read and follow `AGENTS.md`, `docs/TESTING_MODEL.md`, the normative experiment specification in `docs/AGENT_GET_CAPABILITY_EXPERIMENT.md`, and the current implementation/tests. Treat the repository as the source of truth.
 
 ## Goal
 
-Build the smallest deployable server-provided hyperlink keyboard that lets an external retrieval-oriented agent compose persistent text without ever constructing or editing a URL.
+Test one narrow representation boundary discovered through external experiments:
 
-The server supplies exactly 28 literal choices (`a-z`, `space`, `done`) on every keyboard turn. All choices in one menu share one single-use capability. The agent selects a sequence; each successful symbol choice is persisted immediately and produces a fresh capability plus a fresh complete menu.
+- Slice 2a already supplies complete server-generated keyboard URLs as plain text.
+- In the tested ordinary-chat environment, the agent could retrieve and understand that menu but could not traverse even the exact plain-text choice URLs.
+- A separate LLM Parcours experiment surfaced that page-native hyperlinks can be followable where URL construction/re-submission is not.
 
-This task replaces the previously prepared standalone recursive-hop probe. Do not implement `/agent-lab/hop`. The keyboard itself tests recursive following of newly generated literal URLs while also testing compositional state externalization.
+Slice 2b therefore changes only how the already-existing actions are represented. It must expose the same capability-bound keyboard actions as real HTML `<a href="...">` links, without changing the underlying state machine, capability semantics, persistence, authorization isolation, or discovery posture.
 
 ## Current relevant behavior
 
-Verify these points against the repository before editing:
+Verify these points against `main` before editing:
 
-- Slice 1 is deployed under `/agent-lab` and implemented in `src/agent-lab.ts`.
-- Slice 1 uses dedicated `agent_lab_chains`, `agent_lab_capabilities`, `agent_lab_entries`, and `agent_lab_events` tables from migration 0014.
-- migration 0014 CHECK constraints currently admit only Slice 1 capability operations (`write`, `read`, `complete`) and event operations (`enter`, `write`, `read`).
-- `agent_lab_entries.byte_count` requires 1..1024, so it cannot represent the keyboard's required initially empty message without weakening a Slice 1 invariant.
-- lab routes are dispatched before ordinary principal resolution and remain narrowly anonymous/isolated.
-- CI runs the baseline repository checks.
+- Slice 1 `/agent-lab/enter -> write -> read` is deployed and must remain unchanged.
+- Slice 2a keyboard routes are deployed:
+  - `GET /agent-lab/keyboard/enter`
+  - `GET /agent-lab/keyboard/choose?cap=<capability>&choice=<choice>`
+  - `GET /agent-lab/keyboard/read?cap=<read-capability>&id=<message-id>`
+- The keyboard alphabet is exactly lowercase `a-z`, `space`, and `done`.
+- One menu uses one shared single-use choice capability across all 28 choices.
+- A successful letter/space choice atomically consumes the current capability, persists one symbol, and issues one fresh successor choice capability.
+- `done` atomically consumes the choice capability, completes the message, and issues one fresh read capability.
+- Final read consumes that read capability and returns the exact completed value once.
+- The 128-symbol bound, 24-hour expiry, capability hashing, replay protection, safe telemetry, and rejection classification are already implemented.
+- Current menu and `done` responses are plain text.
+- Existing keyboard tests parse URLs from plain-text responses.
+- All lab responses currently use `Cache-Control: no-store`.
 
-Do not edit historical migration 0014. Do not regress Slice 1.
+Do not redesign or reimplement the state machine merely because the presentation changes.
 
 ## Exact implementation scope
 
-### 1. Add dedicated keyboard persistence
+### 1. Render keyboard menus as minimal HTML
 
-Inspect current migration numbering. If main is still through 0014, add `migrations/0015_agent_lab_keyboard.sql`.
+Change the successful response for:
 
-Prefer dedicated keyboard tables rather than rebuilding/weakening Slice 1 tables merely to accommodate empty mutable keyboard messages and new operation taxonomy.
+- `/agent-lab/keyboard/enter`; and
+- successful non-`done` `/agent-lab/keyboard/choose`
 
-Use the smallest schema that cleanly supports:
+from plain text to minimal `text/html; charset=utf-8`.
 
-- a fresh anonymous keyboard chain/session;
-- one persisted message row that begins as the empty string;
-- current value and symbol count;
-- incomplete/completed state;
-- hashed single-use keyboard choice capabilities;
-- hashed single-use final read capabilities, either in the same dedicated capability table or another minimal clean representation;
-- append-only keyboard events sufficient for safe experiment reconstruction.
+Each menu response must contain:
 
-The authoritative message value must be stored after every successful symbol choice. An append-only per-keystroke table is optional, not required. Do not add one unless it materially simplifies atomic correctness.
+- the exact current persisted keyboard value in a simple machine-readable/visible element; and
+- exactly 28 real `<a>` elements in deterministic order:
+  - `a` through `z`;
+  - `space`;
+  - `done`.
 
-Do not store raw capabilities. Do not duplicate the full evolving message into generic event rows.
+Each anchor must:
 
-### 2. Add keyboard routes
+- have visible text equal to its choice label;
+- have an absolute `href` pointing to the existing `/agent-lab/keyboard/choose` route;
+- contain the current raw choice capability and its server-defined `choice`;
+- require no URL editing, interpolation, query construction, JavaScript, form submission, cookie, custom header, or redirect.
 
-Implement exactly:
+All 28 hrefs in one menu must continue to share the same raw capability and differ only by choice.
 
-- `GET /agent-lab/keyboard/enter`
-- `GET /agent-lab/keyboard/choose?cap=<capability>&choice=<choice>`
-- `GET /agent-lab/keyboard/read?cap=<read-capability>&id=<message-id>`
+Do not display the raw URL as visible text merely to preserve the old representation. The experimental variable is that the action is now a page-native hyperlink.
 
-Keep the code in `src/agent-lab.ts` or a focused adjacent module if that materially improves clarity.
+### 2. Render the post-`done` action as one real hyperlink
 
-Dispatch only these explicit routes anonymously before ordinary authentication. Do not create a broad `/agent-lab/*` authorization bypass that accidentally exposes future/unrecognized paths.
+A successful `choice=done` request must keep all existing atomic completion/capability semantics, but change its success representation to minimal HTML.
 
-### 3. Exact menu contract
+The response must contain exactly one actionable `<a>` element:
 
-`/agent-lab/keyboard/enter` must:
+- visible label: a simple stable label such as `read`;
+- absolute `href`: the existing final `/agent-lab/keyboard/read?cap=...&id=...` target using the freshly issued read capability and authoritative message ID.
 
-1. create a fresh keyboard chain/session and an empty persisted message;
-2. issue one high-entropy single-use choice capability A;
-3. return the current empty value plus exactly 28 labeled complete absolute URLs: lowercase `a` through `z`, `space`, and `done`.
+Do not emit another keyboard menu after `done`.
 
-All 28 URLs in one menu must contain the same raw capability A. They differ only by the server-provided `choice` parameter.
+### 3. Keep final read and rejection responses plain text
 
-Use a deterministic stable ordering: `a` through `z`, then `space`, then `done`.
+Do not broaden the representation change further than needed.
 
-Every URL must be complete and directly followable as printed. No placeholder substitution, URL editing, interpolation, form submission, JSON, custom header, cookie, redirect, or JavaScript may be required.
+- Successful final keyboard read remains `text/plain; charset=utf-8` and returns the exact stored value in the established format.
+- Keyboard capability rejections/errors remain simple plain text.
+- Slice 1 responses remain unchanged.
 
-A menu should be mechanically easy to parse from plain text. A suitable shape is:
+### 4. Preserve cache behavior and dynamic uniqueness
 
-```text
-value:
-<current value>
+All affected responses must continue to send `Cache-Control: no-store`.
 
-a: https://<origin>/agent-lab/keyboard/choose?cap=A&choice=a
-...
-z: https://<origin>/agent-lab/keyboard/choose?cap=A&choice=z
-space: https://<origin>/agent-lab/keyboard/choose?cap=A&choice=space
-done: https://<origin>/agent-lab/keyboard/choose?cap=A&choice=done
-```
+Do not add independent random cache-buster/nonce query parameters in this slice.
 
-The exact harmless whitespace may vary, but tests must establish the semantic invariants above.
+The existing capability chain already gives every successor state a fresh opaque capability:
 
-### 4. Symbol choice semantics
+- every successful symbol produces a fresh choice capability;
+- `done` produces a fresh read capability.
 
-For `choice=a` through `z` and `choice=space`, a valid request must atomically:
+That capability is the intentional dynamic suffix/state discriminator. Preserve it unobstructed so the experiment can directly observe the capability chain rather than introducing a second random URL dimension.
 
-1. verify the capability is valid, unexpired, unconsumed, and bound to the keyboard message/chain and choice operation;
-2. consume it exactly once;
-3. append the selected lowercase letter, or one ASCII space for `space`, to the persisted message;
-4. increment symbol count by one;
-5. create exactly one fresh successor choice capability with a fresh 24-hour expiry;
-6. record safe event metadata;
-7. return the newly persisted value plus a new 28-link menu whose links all share that successor capability.
+The static entrance route is allowed to remain static; every fetch creates a fresh chain/capability and its response is `no-store`.
 
-The protected mutation and successor issuance must be atomic enough that concurrent sibling-link requests cannot both mutate the message or fork successors. Do not implement check-then-act logic with a race window.
+### 5. HTML safety
 
-Because the 28 sibling links share one capability, the first successful choice invalidates the other 27.
+Follow `AGENTS.md` HTML safety rules.
 
-### 5. Message length bound
+Do not introduce unsafe interpolation patterns for dynamic text or attribute values. Escape all values placed into HTML text/attributes correctly, including current message text and generated hrefs, even though the current keyboard alphabet and capability format are constrained.
 
-Maximum message length is 128 symbols, where each accepted letter or `space` counts as one symbol.
+Keep the HTML deliberately tiny. No CSS framework or client-side code is needed.
 
-At symbol count 128:
+### 6. Preserve the existing protocol exactly
 
-- another letter/space choice must be rejected;
-- that rejection must **not consume** the current choice capability;
-- it must issue no successor;
-- the `done` sibling URL from the same current menu must remain usable.
+Do not change:
 
-The keyboard alphabet is ASCII-only, so this bound is intentionally symbol-based rather than a general UTF-8 content contract.
+- route paths or query parameter names;
+- keyboard alphabet/order;
+- choice capability format/prefix;
+- single-use semantics;
+- shared-capability sibling behavior;
+- atomic consume/mutate/successor behavior;
+- 24-hour expiry;
+- 128-symbol limit;
+- empty-message `done`;
+- final-read single use;
+- persistence schema;
+- telemetry schema or taxonomy;
+- raw-capability non-persistence;
+- caller-supplied read-ID telemetry protections;
+- auth isolation;
+- discovery posture.
 
-### 6. Done semantics
-
-For `choice=done`, a valid request must atomically:
-
-1. consume the current choice capability;
-2. mark the keyboard message complete;
-3. append no character and leave value/symbol count unchanged;
-4. issue exactly one fresh single-use read capability R, bound to the same keyboard chain/message, with 24-hour expiry;
-5. record safe event metadata;
-6. return exactly one complete absolute read URL containing R and the stable message ID.
-
-Do not return another keyboard menu after `done`.
-
-An empty message may be completed with `done`; this is useful for keeping protocol semantics simple and is not equivalent to Slice 1's nonempty scratch-value rule.
-
-### 7. Final read semantics
-
-`/agent-lab/keyboard/read?cap=R&id=<message-id>` must:
-
-- require a valid unexpired unconsumed read capability bound to the same keyboard chain/message;
-- require the message to be complete;
-- atomically consume R;
-- return the exact persisted message in plain text;
-- issue no successor.
-
-A suitable response is:
-
-```text
-value:
-pebble
-```
-
-Replay must fail without another successful protected read transition.
-
-### 8. Capability and error contract
-
-Keyboard capabilities must preserve the security properties of Slice 1:
-
-- cryptographically secure, high entropy, opaque;
-- raw values never persisted;
-- one-way hashes persisted for lookup/verification;
-- operation/chain/message binding;
-- 24-hour expiry from issuance;
-- successful consumption at most once;
-- no successor on malformed, unknown, expired, replayed, wrong-operation, or cross-chain/message rejection;
-- rejection responses must not become a useful token oracle.
-
-Use a distinct token prefix if useful for keeping keyboard validation and Slice 1 isolation obvious. Do not make tokens encode message text, symbol choice, or mutable state.
-
-Invalid `choice` values outside exactly `a-z`, `space`, `done` must be rejected without consuming a valid capability.
-
-### 9. HTTP contract
-
-All keyboard success and rejection responses must use:
-
-- `text/plain; charset=utf-8`;
-- `Cache-Control: no-store`.
-
-No redirects, HTML, forms, JS, JSON, cookies, custom headers, alternate hosts, or fallback transports.
-
-### 10. Observability
-
-Record enough append-only safe metadata to reconstruct:
-
-- keyboard entrance;
-- successful symbol transitions;
-- completion;
-- final read;
-- rejected attempts and outcome class.
-
-Do not store raw capabilities in events. Do not duplicate the entire evolving message into event rows. The keyboard message table is authoritative for content. Prefer metadata such as message ID, symbol count, operation, outcome, and timestamp.
-
-### 11. Preserve isolation and discovery posture
-
-Do not expose the keyboard in:
-
-- `llms.txt`;
-- sitemaps;
-- normal Loom UI/pages;
-- project/participant manifests;
-- crawler metadata;
-- ordinary agent discovery surfaces.
-
-Do not change `docs/AGENT_ACCESS.md` semantics. The keyboard is an isolated experiment, not ordinary Loom machine access.
+No database migration should be needed for this slice. Do not add one unless a genuinely unavoidable correctness issue appears; if so, stop and report it rather than silently expanding scope.
 
 ## Required tests
 
-Add focused integration tests proving at minimum:
+Update the focused keyboard integration tests to exercise the actual rendered hyperlinks, not reconstructed equivalent URLs.
 
-1. keyboard entrance creates a fresh empty persisted message.
-2. entrance response contains exactly 28 choices in deterministic `a-z`, `space`, `done` order and each is a complete absolute URL.
-3. all 28 URLs in one menu share exactly one raw capability.
-4. raw choice/read capabilities are absent from persistence and event rows.
-5. selecting `p` persists `p`, consumes the old capability once, creates exactly one successor, and returns a fresh 28-link menu using it.
-6. a multi-step deterministic path can compose `pebble` through six separately returned menus.
-7. after each successful symbol, direct DB inspection sees the exact partial value (`p`, `pe`, `peb`, etc.) before the next choice is made.
-8. a sibling URL from an already consumed menu cannot mutate the message or issue another successor.
-9. `space` appends exactly one ASCII space.
-10. invalid choices do not consume an otherwise valid current capability.
-11. at 128 symbols, another symbol is rejected without consuming the capability and `done` with that same capability still succeeds.
-12. `done` on a nonempty message consumes the current choice capability, leaves content/count unchanged, marks completion, issues exactly one read capability, and returns exactly one absolute read URL.
-13. `done` on an empty fresh message is valid.
-14. after completion, stale/sibling keyboard choices cannot mutate the message.
-15. final read returns the exact completed value and consumes R once; replay is rejected.
-16. malformed, unknown, expired, replayed, wrong-operation, and cross-message/cross-chain capabilities issue no successor.
-17. concurrent sibling choices cannot fork the message/successor where Miniflare/D1 test behavior permits reliable exercise.
-18. all keyboard responses are plain text and `Cache-Control: no-store`.
-19. existing Slice 1 tests remain green with unchanged semantics.
-20. unrelated protected Loom routes remain protected.
+At minimum prove:
 
-Tests should parse URLs from actual response text and follow those exact URLs rather than reconstructing equivalent request URLs in test code wherever practical. This keeps the test aligned with the external-agent experiment.
+1. `/agent-lab/keyboard/enter` returns `text/html; charset=utf-8` and `Cache-Control: no-store`.
+2. Its HTML contains exactly 28 anchors in deterministic `a-z`, `space`, `done` order.
+3. Each anchor's visible label matches the choice.
+4. Each `href` is a complete absolute URL to the existing choose route.
+5. All 28 hrefs in one menu carry the same raw choice capability.
+6. The current value is represented exactly and safely.
+7. Following the actual returned `p` anchor persists `p` and returns a new HTML menu whose 28 anchors share a fresh successor capability.
+8. A deterministic path follows actual returned anchors through `p -> e -> b -> b -> l -> e`, confirming each persisted partial value as existing tests already do.
+9. Consumed sibling anchors still reject and cannot fork state.
+10. `space`, invalid choice, expiry, replay, wrong operation, cross-message rejection, length limit, concurrency, and telemetry safety remain covered and semantically unchanged.
+11. At 128 symbols, rejected extra symbols do not consume the capability and the actual `done` sibling anchor remains usable.
+12. Successful `done` returns `text/html; charset=utf-8`, `Cache-Control: no-store`, and exactly one anchor.
+13. That anchor's href is the complete final read URL containing the fresh read capability and authoritative message ID.
+14. Following that actual returned read href returns `text/plain; charset=utf-8` with the exact completed value and no successor.
+15. Empty-message `done` still works.
+16. Rejection responses remain plain text and `no-store`.
+17. HTML success pages contain no forms, buttons, scripts, redirects, or JavaScript-driven action mechanism.
+18. Raw capabilities remain absent from persistence/event rows.
+19. Existing Slice 1 tests remain green with unchanged semantics.
+20. Unrelated protected Loom routes remain protected.
 
-## Migration verification
+Do not add a new HTML parsing dependency just for these tests if the small deterministic markup can be inspected reliably with existing tooling.
 
-Follow `AGENTS.md` migration rules. Verify both:
+## Acceptance experiment
 
-- a fresh database applying all migrations through the new keyboard migration;
-- an existing database through 0014 upgraded through the new migration without resetting or losing Slice 1 lab rows or ordinary Loom data.
+The deployed behavior should support this external black-box run without URL construction:
 
-Do not edit historical migrations.
+1. operator supplies `/agent-lab/keyboard/enter`;
+2. agent follows a presented letter hyperlink;
+3. server returns a fresh HTML menu with a fresh capability;
+4. agent recursively follows presented hyperlinks to compose a short value;
+5. agent follows `done`;
+6. agent follows the single presented read hyperlink;
+7. exact persisted value is returned.
 
-## Acceptance criteria
+For deterministic smoke verification, compose `pebble` entirely by following hrefs extracted from the actual responses.
 
-The task is complete when:
-
-- a caller can enter the keyboard and receive 28 literal choices backed by one single-use capability;
-- successive server-returned menus can compose and persist `pebble` one symbol at a time;
-- every successful symbol is durable before the next menu is used;
-- sibling choices cannot fork state;
-- `done` converts the current choice capability into one final read capability without modifying content;
-- the final literal read URL returns exactly the completed value once;
-- 128-symbol and capability security invariants hold;
-- raw tokens are never persisted;
-- the keyboard remains isolated from ordinary Loom data/auth/discovery;
-- Slice 1 remains intact;
-- required tests and baseline checks pass.
+Do not use production for Codex testing.
 
 ## Required checks
 
@@ -264,33 +185,37 @@ npm run typecheck
 git diff --check
 ```
 
-Also perform the smallest non-production functional smoke available using URLs parsed from responses: keyboard enter -> `p` -> `e` -> `b` -> `b` -> `l` -> `e` -> `done` -> read, and verify exact `pebble` readback plus rejection of at least one consumed sibling capability.
+Also perform the smallest non-production functional smoke available using hrefs parsed from responses:
 
-Do not use production for Codex testing.
+`enter -> p -> e -> b -> b -> l -> e -> done -> read`
 
-If Codex cannot install dependencies because of registry/network restrictions, report that exactly and do not alter dependencies or security settings to compensate. GitHub Actions remains the independent baseline verification layer.
+Verify exact `pebble` readback and rejection of at least one consumed sibling capability.
+
+If Codex cannot install dependencies because of registry/network restrictions, report that exactly and do not alter dependency or security settings to compensate. GitHub Actions is the independent baseline verification layer.
 
 ## Documentation
 
-`docs/AGENT_GET_CAPABILITY_EXPERIMENT.md` is the durable source of truth and has already been updated for this Slice 2 design. Update it only if implementation exposes a necessary clarification; do not silently change the experimental question or settled semantics.
+`docs/AGENT_GET_CAPABILITY_EXPERIMENT.md` is the durable source of truth and has already been updated for Slice 2b. Keep implementation aligned with it.
 
-Do not implement the superseded standalone hop probe.
+Only amend that document if implementation reveals a necessary clarification. Do not silently alter the experimental question or settled capability semantics.
 
 ## Explicit non-goals
 
-Do not implement:
+Do not add:
 
-- `/agent-lab/hop` or any separate recursive-hop protocol;
-- uppercase, digits, punctuation, Unicode input, backspace/delete, cursor movement, editing, or arbitrary free-form query input;
-- discovery, crawler bait, `llms.txt`, sitemap, or normal UI changes;
-- redirects, alternate hosts, shell/curl-specific behavior, or fallback transports;
+- autocomplete, dictionary completion, word/phrase suggestions, or larger action alphabets;
+- buttons, forms, POST transport, JavaScript controls, redirects, or alternate interaction primitives;
+- extra cache-buster/nonces beyond the existing fresh capability chain;
+- uppercase, digits, punctuation, Unicode input, backspace/delete, cursor movement, or editing;
+- arbitrary free-form text/query submission;
+- new persistence tables or migrations;
+- discovery, crawler bait, `llms.txt`, sitemap, or normal Loom UI exposure;
 - project/document access;
 - participant/agent identity;
-- work-for-access, credits, reputation, quotas;
-- agent messaging/coordination;
-- generalized GET mutation outside `/agent-lab`;
+- agent messaging or coordination;
+- work-for-access, credits, reputation, or quotas;
+- generalized GET mutation outside the isolated lab;
 - ordinary machine-auth changes;
-- deployment automation;
 - unrelated refactors or cleanup.
 
-Keep this experimental slice small. The key empirical property is that Loom provides the alphabet and complete literal links while the external agent determines and persists the sequence.
+Keep this slice deliberately small. The experimental variable is only: **the same server-generated capability-bound action targets, represented as native hyperlinks instead of plain-text URLs.**
