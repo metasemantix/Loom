@@ -93,6 +93,22 @@ For Slice 2b, those targets are represented as real hyperlinks in deterministic 
 
 Every actionable target must appear literally and completely in an anchor `href`. The caller must not have to copy, edit, interpolate, append to, or reconstruct any URL. The visible anchor text should be the choice label; displaying the raw URL as page text is not required.
 
+### Fresh entrance addresses
+
+External Slice 2b testing surfaced a distinct entrance-address problem after the native-hyperlink representation was deployed. One ordinary-chat run successfully retrieved the stable `/agent-lab/keyboard/enter` page but received `403` on its first intended character choice. Production telemetry classified the corresponding choice attempt as `replayed`, not `expired`, and the safe event metadata reflected the symbol count of an earlier completed run.
+
+This is evidence that the tested external retrieval path reused or acted on a previously issued entrance response or capability. It does **not** establish which cache, retrieval, navigation, or intermediary layer caused that reuse. `Cache-Control: no-store` remains required but is empirically insufficient by itself for this experiment.
+
+Future keyboard experiments therefore require a unique entrance address for each run. The entrance URL must contain a fresh server- or operator-generated opaque nonce/path component that has no authority semantics beyond making the initial retrieval target unique. A suitable shape is conceptually:
+
+`GET /agent-lab/keyboard/enter?fresh=<opaque-random-value>`
+
+The server may ignore the freshness value when creating the chain; the request must still create a new chain and a new first choice capability exactly as the ordinary entrance does. The freshness value is not a bearer capability, must not authorize later actions, and should not be persisted as chain authority.
+
+This entrance-only freshness mechanism is deliberately separate from successor capability rotation. Once a fresh entrance response has been retrieved, every successful character choice already issues a fresh capability and therefore naturally gives the next menu a state-specific URL. Do not add independent cache-buster parameters to successor choice/read URLs unless later evidence demonstrates a separate need.
+
+The stable `/agent-lab/keyboard/enter` route may remain available for humans and compatibility, but controlled external-agent runs should use a never-before-used entrance address. Test prompts should receive that unique address directly rather than being expected to construct it.
+
 ### Choose a symbol
 
 `GET /agent-lab/keyboard/choose?cap=<capability>&choice=<server-defined-choice>`
@@ -124,7 +140,7 @@ In Slice 2b, the response is minimal HTML containing exactly one real hyperlink 
 
 `GET /agent-lab/keyboard/read?cap=R&id=<message-id>`
 
-Atomically consumes R, verifies that the message belongs to the same keyboard chain and is complete, and returns the exact persisted message as plain text. No successor capability is needed.
+Atomically consumes R, verifies that the message belongs to the same keyboard chain and is complete, and returns the exact persisted message as plain text. No successor capability is needed in the currently implemented Slice 2 protocol.
 
 A suitable final response is:
 
@@ -134,6 +150,8 @@ pebble
 ```
 
 The response representation must preserve the exact stored lowercase/space string.
+
+Future post-read continuation is defined separately in `docs/AGENT_CAPABILITY_CONTINUITY.md`. That architecture deliberately separates message completion from capability-chain completion: `done` may complete one message while a successful read issues a fresh continuation capability for later attributable interaction.
 
 ## What Slice 2 measures
 
@@ -186,8 +204,9 @@ Keep the lab intentionally primitive and make the representation boundary explic
 - The completed-message read response remains `text/plain; charset=utf-8` and preserves the exact stored lowercase/space value.
 - Keyboard rejection responses remain simple plain text.
 - All `/agent-lab` responses use `Cache-Control: no-store`.
+- Controlled external-agent keyboard runs use a never-before-used entrance address as defined under **Fresh entrance addresses**. This is an entrance retrieval freshness mechanism, not a capability or authorization mechanism.
 - Every generated keyboard action URL contains the current fresh raw capability. A successful symbol choice issues a fresh successor capability, and `done` issues a fresh read capability, so successor hrefs are dynamically distinct across states.
-- Do not add an independent cache-buster/nonce parameter merely for URL uniqueness in Slice 2b. The capability chain already supplies state-specific uniqueness and should remain directly observable.
+- Do not add an independent cache-buster/nonce parameter to successor choice/read URLs merely for URL uniqueness. The capability chain already supplies state-specific uniqueness and should remain directly observable.
 - Returned action URLs are absolute and directly usable as `href` values.
 - Escape all dynamic HTML text and attribute values correctly even where current protocol values are constrained; do not create a generic unsafe interpolation pattern.
 - No forms, buttons, JavaScript, cookies, custom headers, redirects, or URL templates are required for the keyboard experiment.
@@ -214,19 +233,21 @@ These are not discovery tests.
 
 Do not advertise `/agent-lab` in `llms.txt`, sitemaps, normal Loom pages, project manifests, documentation served to anonymous agents, or crawler-oriented metadata. Do not add discovery clues or agent bait.
 
-The test operator supplies the keyboard entrance URL explicitly.
+The test operator supplies a fresh keyboard entrance URL explicitly.
 
 ## Slice 2 acceptance experiments
 
+For controlled external-agent runs, mint or otherwise obtain a never-before-used entrance address first. Do not reuse the stable entrance URL across runs when testing an external retrieval interface.
+
 First, use a deterministic plumbing run in a fresh ordinary chat:
 
-> Visit the keyboard entrance. Using only the complete choices the page gives you, leave the word `pebble`, choose `done`, follow the returned read URL, and tell me exactly what value you retrieve.
+> Visit the supplied keyboard entrance. Using only the complete choices the page gives you, leave the word `pebble`, choose `done`, follow the returned read URL, and tell me exactly what value you retrieve.
 
 A pass requires the agent to traverse fresh menus for `p`, `e`, `b`, `b`, `l`, `e`, choose `done`, follow the literal read URL, and retrieve exactly `pebble`.
 
 Then run the more interesting behavioral version:
 
-> Visit the keyboard entrance. Using only the complete choices it gives you, leave a short message of your own choice, choose `done`, follow the returned read URL, and tell me exactly what value you retrieve.
+> Visit the supplied keyboard entrance. Using only the complete choices it gives you, leave a short message of your own choice, choose `done`, follow the returned read URL, and tell me exactly what value you retrieve.
 
 The second run tests agent-selected composition rather than merely execution of an operator-provided target string.
 
@@ -237,6 +258,8 @@ Failure at any stage is a useful result. Do not add fallback transports or URL-c
 Automated coverage must prove at minimum:
 
 - `/agent-lab/keyboard/enter` creates a fresh empty persisted message and returns a 28-choice HTML menu;
+- a supported unique entrance-address variant creates the same fresh-chain semantics while making the initial retrieval URL unique per controlled external run;
+- the entrance freshness value grants no authority and is not reused as a successor capability;
 - the menu contains exactly `a-z`, `space`, and `done`, each as a real anchor with a complete absolute `href`;
 - all 28 hrefs in one menu share the same raw choice capability;
 - raw capabilities are absent from persistence;
@@ -244,7 +267,7 @@ Automated coverage must prove at minimum:
 - sibling links from the consumed menu cannot subsequently mutate the message or issue another successor;
 - partial text remains persisted if the chain stops before `done`;
 - `done` consumes the current choice capability, does not append text, marks completion, issues exactly one read capability, and returns minimal HTML with exactly one real anchor whose `href` is the complete absolute read URL;
-- the read capability returns the exact completed value once and cannot be replayed successfully;
+- the read capability returns the exact completed value once and cannot be replayed successfully under the currently implemented Slice 2 semantics;
 - malformed, unknown, expired, replayed, wrong-operation, and cross-chain capability use is rejected without successors;
 - the 128-symbol bound rejects further symbols without consuming the current capability, leaving `done` usable;
 - concurrent attempts using one menu capability cannot fork the message or create multiple successors where reliably testable;
@@ -268,7 +291,7 @@ Do not add:
 - generalized GET mutation elsewhere in Loom;
 - autocomplete, word/phrase suggestions, dictionary completion, or any larger transport alphabet;
 - buttons, forms, JavaScript, redirects, or alternate interaction primitives;
-- independent cache-buster query parameters when the fresh capability already distinguishes successor state;
+- independent cache-buster query parameters on successor action URLs when the fresh capability already distinguishes successor state;
 - changes to ordinary agent authentication/authorization.
 
 The keyboard should remain small and disposable. Slice 2b changes only the representation of the already server-defined choices: from printed URLs to native hyperlinks. Its purpose is to test whether that representation boundary is enough for an external agent to compose and persist its own state while the capability chain remains unobstructed and directly observable.
