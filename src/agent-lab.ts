@@ -87,8 +87,8 @@ export async function readAgentLab(request:Request,env:Env):Promise<Response> {
 
 const keyboardCapabilityPattern=/^labkey_[0-9a-f]{36}$/;
 const keyboardChoices=[..."abcdefghijklmnopqrstuvwxyz","space","done"] as const;
-type KeyboardOperation="choose"|"read";
-type KeyboardCapabilityRow=CapabilityRow&{message_id:string;symbol_count:number|null;completed_at:string|null};
+type KeyboardOperation="choose"|"read"|"continue";
+type KeyboardCapabilityRow=CapabilityRow&{message_id:string;message_chain_id:string;symbol_count:number|null;completed_at:string|null};
 
 function keyboardMenu(request:Request,value:string,capability:string):Response {
   const choices=keyboardChoices.map(choice=>`<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/choose",{cap:capability,choice}))}">${escapeHtml(choice)}</a>`).join("\n");
@@ -99,13 +99,15 @@ async function rejectKeyboard(env:Env,operation:KeyboardOperation,raw:string|nul
   const at=new Date().toISOString();
   let row:KeyboardCapabilityRow|null=null,outcome="malformed";
   if(raw&&keyboardCapabilityPattern.test(raw)){
-    row=await env.DB.prepare(`SELECT c.id,c.chain_id,c.message_id,c.expected_operation,c.expires_at,c.consumed_at,m.symbol_count,m.completed_at FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.token_hash=?`).bind(await hashSecret(raw)).first<KeyboardCapabilityRow>();
+    row=await env.DB.prepare(`SELECT c.id,c.chain_id,c.message_id,c.expected_operation,c.expires_at,c.consumed_at,m.chain_id message_chain_id,m.symbol_count,m.completed_at FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.token_hash=?`).bind(await hashSecret(raw)).first<KeyboardCapabilityRow>();
     if(!row)outcome="unknown";
     else if(row.expected_operation!==operation)outcome="wrong_operation";
     else if(row.consumed_at)outcome="replayed";
     else if(row.expires_at<=at)outcome="expired";
+    else if(row.chain_id!==row.message_chain_id)outcome="wrong_chain";
     else if(messageId!==undefined&&row.message_id!==messageId)outcome="wrong_chain";
-    else if(row.completed_at)outcome="wrong_state";
+    else if(operation==="choose"&&row.completed_at)outcome="wrong_state";
+    else if(operation!=="choose"&&!row.completed_at)outcome="wrong_state";
     else if(validCapabilityOutcome)outcome=validCapabilityOutcome;
     else if(operation==="choose"&&row.symbol_count===128)outcome="length_limit";
     else outcome="wrong_state";
@@ -116,10 +118,12 @@ async function rejectKeyboard(env:Env,operation:KeyboardOperation,raw:string|nul
 }
 
 export async function enterAgentLabKeyboard(request:Request,env:Env):Promise<Response> {
+  const fresh=new URL(request.url).searchParams.get("fresh");
+  if(fresh!==null&&fresh.length>128)return text("Fresh entrance value exceeds the 128-character limit.\n",400);
   const now=new Date(),at=now.toISOString(),chainId=opaque("akc"),messageId=opaque("akm"),capabilityId=opaque("akp"),capability=opaque("labkey");
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_chains(id,created_at) VALUES(?,?)`).bind(chainId,at),
-    env.DB.prepare(`INSERT INTO agent_lab_keyboard_messages(id,chain_id,value,symbol_count,created_at) VALUES(?,?,'',0,?)`).bind(messageId,chainId,at),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_messages(id,chain_id,message_index,value,symbol_count,created_at) VALUES(?,?,1,'',0,?)`).bind(messageId,chainId,at),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,token_hash,expected_operation,created_at,expires_at) VALUES(?,?,?,?, 'choose',?,?)`).bind(capabilityId,chainId,messageId,await hashSecret(capability),at,expires(now)),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) VALUES(?,?,?,?,'enter','created',0,?)`).bind(opaque("ake"),chainId,messageId,capabilityId,at),
   ]);
@@ -135,7 +139,7 @@ export async function chooseAgentLabKeyboard(request:Request,env:Env):Promise<Re
     const results=await env.DB.batch([
       env.DB.prepare(`UPDATE agent_lab_keyboard_capabilities SET consumed_at=?,consumption_id=? WHERE token_hash=? AND expected_operation='choose' AND consumed_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM agent_lab_keyboard_messages m WHERE m.id=message_id AND m.chain_id=chain_id AND m.completed_at IS NULL)`).bind(at,consumptionId,hash,at),
       env.DB.prepare(`UPDATE agent_lab_keyboard_messages SET completed_at=? WHERE id=(SELECT message_id FROM agent_lab_keyboard_capabilities WHERE consumption_id=?) AND completed_at IS NULL`).bind(at,consumptionId),
-      env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,message_id,?,'read',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,await hashSecret(next),at,expires(now),consumptionId),
+      env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,predecessor_capability_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,message_id,id,?,'read',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,await hashSecret(next),at,expires(now),consumptionId),
       env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) SELECT ?,c.chain_id,c.message_id,c.id,'complete','allowed',m.symbol_count,? FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.consumption_id=?`).bind(opaque("ake"),at,consumptionId),
     ]);
     if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"choose",capability);
@@ -147,7 +151,7 @@ export async function chooseAgentLabKeyboard(request:Request,env:Env):Promise<Re
   const results=await env.DB.batch([
     env.DB.prepare(`UPDATE agent_lab_keyboard_capabilities SET consumed_at=?,consumption_id=? WHERE token_hash=? AND expected_operation='choose' AND consumed_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM agent_lab_keyboard_messages m WHERE m.id=message_id AND m.chain_id=chain_id AND m.completed_at IS NULL AND m.symbol_count<128)`).bind(at,consumptionId,hash,at),
     env.DB.prepare(`UPDATE agent_lab_keyboard_messages SET value=value||?,symbol_count=symbol_count+1 WHERE id=(SELECT message_id FROM agent_lab_keyboard_capabilities WHERE consumption_id=?) AND completed_at IS NULL AND symbol_count<128`).bind(symbol,consumptionId),
-    env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,message_id,?,'choose',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,await hashSecret(next),at,expires(now),consumptionId),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,predecessor_capability_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,message_id,id,?,'choose',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,await hashSecret(next),at,expires(now),consumptionId),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) SELECT ?,c.chain_id,c.message_id,c.id,'choose','allowed',m.symbol_count,? FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.consumption_id=?`).bind(opaque("ake"),at,consumptionId),
   ]);
   if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"choose",capability);
@@ -159,13 +163,28 @@ export async function chooseAgentLabKeyboard(request:Request,env:Env):Promise<Re
 export async function readAgentLabKeyboard(request:Request,env:Env):Promise<Response> {
   const url=new URL(request.url),capability=url.searchParams.get("cap"),messageId=url.searchParams.get("id")??"";
   if(!capability||!keyboardCapabilityPattern.test(capability))return rejectKeyboard(env,"read",capability,messageId||undefined);
-  const at=new Date().toISOString(),hash=await hashSecret(capability),consumptionId=opaque("aku");
+  const now=new Date(),at=now.toISOString(),hash=await hashSecret(capability),consumptionId=opaque("aku"),next=opaque("labkey"),nextId=opaque("akp");
   const results=await env.DB.batch([
     env.DB.prepare(`UPDATE agent_lab_keyboard_capabilities SET consumed_at=?,consumption_id=? WHERE token_hash=? AND expected_operation='read' AND consumed_at IS NULL AND expires_at>? AND message_id=? AND EXISTS(SELECT 1 FROM agent_lab_keyboard_messages m WHERE m.id=message_id AND m.chain_id=chain_id AND m.completed_at IS NOT NULL)`).bind(at,consumptionId,hash,at,messageId),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,predecessor_capability_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,message_id,id,?,'continue',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,await hashSecret(next),at,expires(now),consumptionId),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) SELECT ?,c.chain_id,c.message_id,c.id,'read','allowed',m.symbol_count,? FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.consumption_id=?`).bind(opaque("ake"),at,consumptionId),
   ]);
   if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"read",capability,messageId);
   const message=await env.DB.prepare(`SELECT value FROM agent_lab_keyboard_messages WHERE id=?`).bind(messageId).first<{value:string}>();
   if(!message)throw new Error("Consumed keyboard read has no message");
-  return text(`value:\n${message.value}\n`);
+  return html(`<!doctype html>\n<meta charset="utf-8">\n<pre id="value">${escapeHtml(message.value)}</pre>\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/continue",{cap:next}))}">continue</a>\n`);
+}
+
+export async function continueAgentLabKeyboard(request:Request,env:Env):Promise<Response> {
+  const capability=new URL(request.url).searchParams.get("cap");
+  if(!capability||!keyboardCapabilityPattern.test(capability))return rejectKeyboard(env,"continue",capability);
+  const now=new Date(),at=now.toISOString(),hash=await hashSecret(capability),consumptionId=opaque("aku"),messageId=opaque("akm"),next=opaque("labkey"),nextId=opaque("akp");
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE agent_lab_keyboard_capabilities SET consumed_at=?,consumption_id=? WHERE token_hash=? AND expected_operation='continue' AND consumed_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM agent_lab_keyboard_messages m WHERE m.id=message_id AND m.chain_id=chain_id AND m.completed_at IS NOT NULL)`).bind(at,consumptionId,hash,at),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_messages(id,chain_id,message_index,value,symbol_count,created_at) SELECT ?,c.chain_id,m.message_index+1,'',0,? FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.consumption_id=?`).bind(messageId,at,consumptionId),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,predecessor_capability_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,?,id,?,'choose',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,messageId,await hashSecret(next),at,expires(now),consumptionId),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) SELECT ?,chain_id,?,id,'continue','allowed',0,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(opaque("ake"),messageId,at,consumptionId),
+  ]);
+  if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"continue",capability);
+  return keyboardMenu(request,"",next);
 }
