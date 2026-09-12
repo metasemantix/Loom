@@ -14,6 +14,7 @@ import structuredCompression from "../migrations/0012_structured_compression_v3.
 import expandedCompressionSize from "../migrations/0013_expand_compression_size.sql?raw";
 import agentGetCapabilityExperiment from "../migrations/0014_agent_get_capability_experiment.sql?raw";
 import agentLabKeyboard from "../migrations/0015_agent_lab_keyboard.sql?raw";
+import agentLabKeyboardContinuity from "../migrations/0016_agent_lab_keyboard_continuity.sql?raw";
 
 function statements(sql:string){const result:string[]=[],lines:string[]=[],flush=()=>{const value=lines.join("\n").trim().replace(/;$/,"");lines.length=0;if(value)result.push(value)};let trigger=false;for(const line of sql.split("\n")){if(/^CREATE TRIGGER\b/.test(line.trim()))trigger=true;lines.push(line);if(trigger?/^END;$/.test(line.trim()):line.trim().endsWith(";")){flush();trigger=false}}flush();return result}
 async function apply(sql:string){for(const statement of statements(sql))await env.DB.prepare(statement).run()}
@@ -68,5 +69,25 @@ await env.DB.batch([
   env.DB.prepare(`INSERT INTO agent_lab_capabilities(id,chain_id,token_hash,expected_operation,created_at,expires_at) VALUES('acp_migration','alc_migration','migration-lab-hash','write',?,'2027-01-01T00:00:00.000Z')`).bind(at),
 ]);
 await apply(agentLabKeyboard);
+// Exercise 0016 against populated 0015 keyboard state, including consumed rows and telemetry.
+await env.DB.batch([
+  env.DB.prepare(`INSERT INTO agent_lab_keyboard_chains(id,created_at) VALUES('akc_migration',?)`).bind(at),
+  env.DB.prepare(`INSERT INTO agent_lab_keyboard_messages(id,chain_id,value,symbol_count,completed_at,created_at) VALUES('akm_migration','akc_migration','old',3,?,?)`).bind(at,at),
+  env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,token_hash,expected_operation,created_at,expires_at,consumed_at,consumption_id) VALUES('akp_migration','akc_migration','akm_migration','keyboard-migration-hash','read',?,'2027-01-01T00:00:00.000Z',?,'aku_migration')`).bind(at,at),
+  env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) VALUES('ake_migration','akc_migration','akm_migration','akp_migration','read','allowed',3,?)`).bind(at),
+]);
+const keyboardBefore={
+  chain:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_chains WHERE id='akc_migration'`).first(),
+  message:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_messages WHERE id='akm_migration'`).first(),
+  capability:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_capabilities WHERE id='akp_migration'`).first(),
+  event:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_events WHERE id='ake_migration'`).first(),
+};
+await apply(agentLabKeyboardContinuity);
+const keyboardAfter={
+  chain:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_chains WHERE id='akc_migration'`).first(),
+  message:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_messages WHERE id='akm_migration'`).first(),
+  capability:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_capabilities WHERE id='akp_migration'`).first(),
+  event:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_events WHERE id='ake_migration'`).first(),
+};
 const foreignKeyErrors=(await env.DB.prepare(`PRAGMA foreign_key_check`).all()).results;
-(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,migratedProseCompression,migratedStructuredColumns,compressionRowsBeforeExpansion,compressionRowsAfterExpansion,selectedCompressionAfterExpansion,foreignKeyErrors};
+(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,migratedProseCompression,migratedStructuredColumns,compressionRowsBeforeExpansion,compressionRowsAfterExpansion,selectedCompressionAfterExpansion,keyboardBefore,keyboardAfter,foreignKeyErrors};
