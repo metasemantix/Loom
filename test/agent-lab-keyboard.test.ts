@@ -55,8 +55,8 @@ describe("verbatim-link compositional keyboard",()=>{
   });
 
   it("escapes the exact current value and every action href in rendered HTML",async()=>{
-    const current=await menu(),row=await messageFor(cap(current));
-    await env.DB.prepare(`UPDATE agent_lab_keyboard_messages SET value=? WHERE id=?`).bind(`<unsafe & "quoted">`,row!.id).run();
+    const current=await menu(),row=await messageFor(cap(current)),unsafeValue=`<unsafe & "quoted">`;
+    await env.DB.prepare(`UPDATE agent_lab_keyboard_messages SET value=?,symbol_count=? WHERE id=?`).bind(unsafeValue,unsafeValue.length,row!.id).run();
     const rendered=await choose(current,"p");
     expect(rendered.value).toBe(`<unsafe & "quoted">p`);expect(rendered.body).toContain(`&lt;unsafe &amp; &quot;quoted&quot;&gt;p`);
     expect(rendered.body).not.toContain(`<unsafe`);expect(rendered.body).toContain("&amp;choice=a");expect(rendered.links.get("a")).toContain("&choice=a");
