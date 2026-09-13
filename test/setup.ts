@@ -15,6 +15,7 @@ import expandedCompressionSize from "../migrations/0013_expand_compression_size.
 import agentGetCapabilityExperiment from "../migrations/0014_agent_get_capability_experiment.sql?raw";
 import agentLabKeyboard from "../migrations/0015_agent_lab_keyboard.sql?raw";
 import agentLabKeyboardContinuity from "../migrations/0016_agent_lab_keyboard_continuity.sql?raw";
+import agentLabAuthorReentry from "../migrations/0017_agent_lab_author_reentry.sql?raw";
 
 function statements(sql:string){const result:string[]=[],lines:string[]=[],flush=()=>{const value=lines.join("\n").trim().replace(/;$/,"");lines.length=0;if(value)result.push(value)};let trigger=false;for(const line of sql.split("\n")){if(/^CREATE TRIGGER\b/.test(line.trim()))trigger=true;lines.push(line);if(trigger?/^END;$/.test(line.trim()):line.trim().endsWith(";")){flush();trigger=false}}flush();return result}
 async function apply(sql:string){for(const statement of statements(sql))await env.DB.prepare(statement).run()}
@@ -89,5 +90,20 @@ const keyboardAfter={
   capability:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_capabilities WHERE id='akp_migration'`).first(),
   event:await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_events WHERE id='ake_migration'`).first(),
 };
+// Exercise 0017 against real 0016 multi-message history.
+await env.DB.batch([
+  env.DB.prepare(`INSERT INTO agent_lab_keyboard_messages(id,chain_id,message_index,value,symbol_count,completed_at,created_at) VALUES('akm_migration_2','akc_migration',2,'later',5,?,?)`).bind(at,at),
+  env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,predecessor_capability_id,token_hash,expected_operation,created_at,expires_at) VALUES('akp_migration_2','akc_migration','akm_migration_2','akp_migration','keyboard-migration-hash-2','choose',?,'2027-01-01T00:00:00.000Z')`).bind(at),
+  env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) VALUES('ake_migration_2','akc_migration','akm_migration_2','akp_migration_2','continue','allowed',0,?)`).bind(at),
+  env.DB.prepare(`INSERT INTO agent_lab_keyboard_chains(id,created_at) VALUES('akc_migration_single',?)`).bind(at),
+  env.DB.prepare(`INSERT INTO agent_lab_keyboard_messages(id,chain_id,message_index,value,symbol_count,completed_at,created_at) VALUES('akm_migration_single','akc_migration_single',1,'solo',4,?,?)`).bind(at,at),
+]);
+await apply(agentLabAuthorReentry);
+const keyboardAuthorMigration={
+  messages:(await env.DB.prepare(`SELECT id,chain_id,value FROM agent_lab_keyboard_messages WHERE id LIKE 'akm_migration%' ORDER BY id`).all()).results,
+  memberships:(await env.DB.prepare(`SELECT am.author_chain_id,am.message_chain_id,am.author_index FROM agent_lab_keyboard_author_members am JOIN agent_lab_keyboard_messages m ON m.chain_id=am.message_chain_id WHERE m.id LIKE 'akm_migration%' ORDER BY am.author_index`).all()).results,
+  capabilities:(await env.DB.prepare(`SELECT id,chain_id,message_id,predecessor_capability_id FROM agent_lab_keyboard_capabilities WHERE id LIKE 'akp_migration%' ORDER BY id`).all()).results,
+  events:(await env.DB.prepare(`SELECT id,chain_id,message_id,outcome FROM agent_lab_keyboard_events WHERE id LIKE 'ake_migration%' ORDER BY id`).all()).results,
+};
 const foreignKeyErrors=(await env.DB.prepare(`PRAGMA foreign_key_check`).all()).results;
-(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,migratedProseCompression,migratedStructuredColumns,compressionRowsBeforeExpansion,compressionRowsAfterExpansion,selectedCompressionAfterExpansion,keyboardBefore,keyboardAfter,foreignKeyErrors};
+(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,migratedProseCompression,migratedStructuredColumns,compressionRowsBeforeExpansion,compressionRowsAfterExpansion,selectedCompressionAfterExpansion,keyboardBefore,keyboardAfter,keyboardAuthorMigration,foreignKeyErrors};

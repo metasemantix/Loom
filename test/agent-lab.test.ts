@@ -90,7 +90,12 @@ describe("isolated experimental GET capability chain",()=>{
 
   it("applies the isolated schema after the populated historical fixture",async()=>{
     expect(await env.DB.prepare("SELECT id FROM documents WHERE id='doc_migration'").first()).toBeTruthy();
-    expect((await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'agent_lab_%'").all()).results).toHaveLength(8);
+    const tables=(await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'agent_lab_%' ORDER BY name").all<{name:string}>()).results.map(row=>row.name);
+    expect(tables).toEqual([
+      "agent_lab_capabilities","agent_lab_chains","agent_lab_entries","agent_lab_events",
+      "agent_lab_keyboard_author_chains","agent_lab_keyboard_author_members","agent_lab_keyboard_capabilities",
+      "agent_lab_keyboard_chains","agent_lab_keyboard_events","agent_lab_keyboard_messages",
+    ]);
     expect((await env.DB.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
   });
 });
