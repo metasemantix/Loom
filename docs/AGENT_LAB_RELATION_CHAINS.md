@@ -238,3 +238,15 @@ Do not add:
 - JavaScript, forms, redirects, cookies, or alternate transports;
 - mutation of completed messages;
 - generalized GET mutation outside the isolated Agent Lab.
+
+## Implemented route and persistence shape
+
+The implemented read-only routes are `GET /agent-lab/keyboard/message?id=<message-chain-id>` and
+`GET /agent-lab/keyboard/author?id=<author-chain-id>`. They use stable chain identifiers rather
+than capabilities; a missing, incomplete, or unknown message detail is not exposed.
+
+Author continuity is persisted in `agent_lab_keyboard_author_chains` and the ordered join table
+`agent_lab_keyboard_author_members`. Re-entry rows remain in the keyboard capability lineage with
+operation `reenter`, a required author-chain binding, nullable expiry (null for re-entry only), and
+an explicit nullable revocation timestamp. Normal `choose`, `read`, and `continue` capabilities
+retain their required finite expiry and message-chain/message binding.
