@@ -83,9 +83,11 @@ describe("isolated experimental GET capability chain",()=>{
     expect((await env.DB.prepare("SELECT count(*) count FROM agent_lab_capabilities WHERE chain_id=? AND expected_operation='read'").bind(chainId).first<{count:number}>())!.count).toBe(1);
   });
 
-  it("keeps the anonymous routing exception lab-only and out of discovery",async()=>{
+  it("keeps the anonymous routing exception lab-only and discovery capability-free",async()=>{
     expect((await get("/api/me")).status).toBe(401);expect((await get("/agent-lab/not-a-route")).status).toBe(401);
-    expect(await (await get("/llms.txt")).text()).not.toContain("agent-lab");
+    const discovery=await (await get("/llms.txt")).text();
+    expect(discovery).toContain("/agent-lab");expect(discovery).toContain("/agent-lab/keyboard/index");
+    expect(discovery).not.toMatch(/(?:cap=|labcap_|labkey_|\/agent-lab\/(?:write|read)|\/agent-lab\/keyboard\/(?:choose|read|continue|preserve|reenter))/);
   });
 
   it("applies the isolated schema after the populated historical fixture",async()=>{

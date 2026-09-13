@@ -93,7 +93,7 @@ describe("public discovery", () => {
     for (const href of ["/login", "/agent", "/agent-lab", "/llms.txt", "/.well-known/loom-agent"]) expect(body).toContain(`<a href="${href}">`);
     expect(body).not.toContain("<script");
 
-    const anonymousMe = await SELF.fetch(`${origin}/me`);
+    const anonymousMe = await SELF.fetch(`${origin}/me`, { redirect: "manual" });
     expect(anonymousMe.status).toBe(302);
     expect(anonymousMe.headers.get("location")).toBe(`${origin}/login`);
     const alice = await participant("discovery");
@@ -813,7 +813,7 @@ describe("read-only machine access",()=>{
   });
 
   it("publishes non-secret discovery and a parseable unauthenticated workbench",async()=>{
-    const orientation=await SELF.fetch(`${origin}/llms.txt`);expect(orientation.status).toBe(200);expect(orientation.headers.get("content-type")).toContain("text/plain");const text=await orientation.text();expect(text.length).toBeLessThan(500);expect(text).toContain("/agent");expect(text).toContain("/.well-known/loom-agent");expect(text).toContain("/login");
+    const orientation=await SELF.fetch(`${origin}/llms.txt`);expect(orientation.status).toBe(200);expect(orientation.headers.get("content-type")).toContain("text/plain");const text=await orientation.text();expect(text.length).toBeLessThan(750);expect(text.trim().split("\n").length).toBeLessThanOrEqual(12);expect(text).toContain("/agent");expect(text).toContain("/.well-known/loom-agent");expect(text).toContain("/login");
     const discovery=await SELF.fetch(`${origin}/.well-known/loom-agent`).then(r=>r.json<any>());expect(discovery).toMatchObject({service:"Loom",protocolVersion:"1",entrance:"/agent",authentication:{scheme:"Bearer"},orientation:"/llms.txt"});expect(JSON.stringify(discovery)).not.toMatch(/projectId|credential|token_hash/);
     expect((await SELF.fetch(`${origin}/login`)).status).toBe(200);const page=await SELF.fetch(`${origin}/agent`),html=await page.text();expect(page.status).toBe(200);expect(html).toContain("ordinary Loom sign-in");expect(html).toContain('type="password"');expect(html).not.toContain("localStorage");const script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1]??"";expect(()=>new Function(script)).not.toThrow();
   });
