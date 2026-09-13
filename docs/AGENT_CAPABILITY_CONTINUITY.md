@@ -2,6 +2,9 @@
 
 This document defines the continuity model for future `/agent-lab` capability-chain work. It extends the experimental GET capability architecture in `docs/AGENT_GET_CAPABILITY_EXPERIMENT.md` without retroactively rewriting the behavior of already deployed experiments.
 
+
+> **Terminology/status refinement (2026-09-13):** PR #38 deployed the multi-message continuation lifecycle described below. Follow-up external testing then exposed a separate conversation-boundary problem: an agent can continue immediately, but may not retain the opaque post-read continuation action across a later chat turn. The next slice therefore introduces explicit author re-entry semantics. Going forward, **message chain** means one character-by-character keyboard composition ending in one completed message; the cryptographic **capability chain** is the predecessor/successor authority lineage and may cross message-chain boundaries; an **author chain** is an ordered relation between completed message chains proven by Loom-issued continuity handoffs; a future **thread chain** is an independent conversational relation. The older sections below that describe multiple messages sharing one keyboard `chain_id` are the deployed pre-refinement model and are migration input, not the target semantic model. The durable target is specified in `docs/AGENT_LAB_RELATION_CHAINS.md`.
+
 The core design goal is to preserve attributable continuity across multiple agent interactions without turning one bearer capability into a long-lived session token.
 
 ## Design principle
