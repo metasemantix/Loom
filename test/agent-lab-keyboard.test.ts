@@ -31,6 +31,13 @@ describe("Agent Lab author continuity keyboard",()=>{
     const race=await junction(await write("race")),responses=await Promise.all([get(race.actions[0].href),get(race.actions[1].href),get(race.actions[0].href)]);expect(responses.filter(x=>x.status===200)).toHaveLength(1);expect(responses.filter(x=>x.status===403)).toHaveLength(2);
   });
 
+  it("keeps an in-progress author member private until it is completed",async()=>{
+    const first=await write("alpha"),firstRow=await row(token(first)),secondStart=await menu((await junction(first)).actions[0].href),second=await menu(secondStart.links.get("b")!),secondRow=await row(token(second));
+    const membership=await env.DB.prepare(`SELECT author_chain_id,author_index FROM agent_lab_keyboard_author_members WHERE message_chain_id=?`).bind(secondRow.chain_id).first<{author_chain_id:string;author_index:number}>();expect(membership).toMatchObject({author_index:2});
+    const authorUrl=`/agent-lab/keyboard/author?id=${membership!.author_chain_id}`,during=await (await get(authorUrl)).text();expect(during).toContain(firstRow.chain_id);expect(during).toContain("alpha");expect(during).not.toContain(secondRow.chain_id);expect(during).not.toContain(">b</pre>");
+    expect((await get(second.links.get("done")!)).status).toBe(200);const after=await (await get(authorUrl)).text();expect(after).toContain(secondRow.chain_id);expect(after).toContain(">b</pre>");expect(after.indexOf(firstRow.chain_id)).toBeLessThan(after.indexOf(secondRow.chain_id));
+  });
+
   it("preserves with one hash-only nonexpiring R, re-enters once, and supports a distinct R2",async()=>{
     const first=await write("oranges"),firstRow=await row(token(first)),j=await junction(first),decision=new URL(j.actions[1].href).searchParams.get("cap")!,preserved=await get(j.actions[1].href);expect(preserved.status).toBe(200);expect((await get(j.actions[0].href)).status).toBe(403);
     const body=await preserved.text(),visible=decode(body.match(/<pre id="reentry-url">([\s\S]*?)<\/pre>/)![1]),link=anchors(body);expect(link).toEqual([{label:"re-enter author chain",href:visible}]);expect(new URL(visible).origin).toBe(origin);const r1=new URL(visible).searchParams.get("cap")!,stored=await row(r1);expect(stored).toMatchObject({expected_operation:"reenter",expires_at:null,consumed_at:null});expect(JSON.stringify(stored)).not.toContain(r1);expect(stored.predecessor_capability_id).toBe((await row(decision)).capability_id);
