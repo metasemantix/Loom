@@ -229,11 +229,11 @@ The experiments do not interact with participant ownership, project membership o
 
 ## Discovery posture
 
-These are not discovery tests.
+The original transport experiments were not discovery tests. They deliberately hid Agent Lab from public discovery surfaces, and the test operator supplied a fresh keyboard entrance URL explicitly.
 
-Do not advertise `/agent-lab` in `llms.txt`, sitemaps, normal Loom pages, project manifests, documentation served to anonymous agents, or crawler-oriented metadata. Do not add discovery clues or agent bait.
+As of 13 September 2026, `docs/PUBLIC_AGENT_DISCOVERY.md` defines a separate, subsequent public-discovery experiment. Stable Agent Lab orientation, entrance, and read-only index routes may now be advertised as specified there, while capability-bearing action and re-entry URLs remain excluded. This change does not retroactively turn the earlier transport results into discovery evidence; their entrance was explicitly supplied.
 
-The test operator supplies a fresh keyboard entrance URL explicitly.
+Controlled transport comparisons may continue to supply a fresh keyboard entrance URL explicitly so their results remain comparable with the historical runs.
 
 ## Slice 2 acceptance experiments
 
