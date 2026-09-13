@@ -83,6 +83,69 @@ beforeEach(async () => {
   await env.DB.exec("DELETE FROM machine_read_audit; DELETE FROM project_machine_checkins; DELETE FROM project_machine_credentials; DELETE FROM account_events; DELETE FROM project_events; DELETE FROM project_invitations; DELETE FROM project_documents; DELETE FROM project_members; DELETE FROM projects; DELETE FROM sessions; DELETE FROM document_events; DELETE FROM document_versions; DELETE FROM documents; DELETE FROM participants; DELETE FROM auth_identities; DELETE FROM users;");
 });
 
+describe("public discovery", () => {
+  it("serves a crawlable public root while preserving /me authentication", async () => {
+    const response = await SELF.fetch(`${origin}/`), body = await response.text();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(body).toContain("<title>Metasemantix Loom");
+    expect(body).toContain('<meta name="description"');
+    for (const href of ["/login", "/agent", "/agent-lab", "/llms.txt", "/.well-known/loom-agent"]) expect(body).toContain(`<a href="${href}">`);
+    expect(body).not.toContain("<script");
+
+    const anonymousMe = await SELF.fetch(`${origin}/me`);
+    expect(anonymousMe.status).toBe(302);
+    expect(anonymousMe.headers.get("location")).toBe(`${origin}/login`);
+    const alice = await participant("discovery");
+    const authenticatedMe = await SELF.fetch(`${origin}/me`, { headers: { cookie: alice.cookie } });
+    expect(authenticatedMe.status).toBe(200);
+    expect(await authenticatedMe.text()).toContain("User discovery’s space");
+  });
+
+  it("serves Agent Lab orientation with stable links and no issued capability", async () => {
+    const response = await SELF.fetch(`${origin}/agent-lab`), body = await response.text();
+    expect(response.status).toBe(200);
+    expect(body).toContain("isolated from ordinary Loom participants, projects, and documents");
+    for (const href of ["/agent-lab/keyboard/enter", "/agent-lab/keyboard/index", "/agent", "/llms.txt", "/"]) expect(body).toContain(`<a href="${href}">`);
+    expect(body).toContain("fresh</code> is not authority");
+    expect(body).not.toMatch(/(?:cap=|labkey_|reentry-url|\/keyboard\/(?:choose|read|continue|preserve|reenter))/);
+    expect(body).not.toContain("<script");
+  });
+
+  it("keeps plain-text and structured discovery separated and non-secret", async () => {
+    const llmsResponse = await SELF.fetch(`${origin}/llms.txt`), llms = await llmsResponse.text();
+    expect(llmsResponse.headers.get("content-type")).toContain("text/plain");
+    expect(llms).toContain("Metasemantix Loom");
+    for (const path of ["/", "/agent", "/agent-lab", "/.well-known/loom-agent", "/agent-lab/keyboard/index"]) expect(llms).toContain(path);
+    expect(llms).toContain("opaque project-scoped bearer credential");
+    expect(llms).not.toMatch(/(?:cap=|labkey_|doc_[a-z0-9]+|prj_[a-z0-9]+)/);
+
+    const discovery = await SELF.fetch(`${origin}/.well-known/loom-agent`).then(response => response.json<any>());
+    expect(discovery).toMatchObject({ service: "Loom", protocolVersion: "1", entrance: "/agent", authentication: { scheme: "Bearer", transport: "Authorization header" }, endpoints: { introspection: "/api/agent/me", project: "/api/agent/project", documents: "/api/agent/documents", document: "/api/agent/documents/{document_id}", checkin: "/api/agent/check-in" }, orientation: "/llms.txt" });
+    expect(discovery.publicExperimental).toMatchObject({ serviceName: "Metasemantix Loom", root: "/", orientation: "/agent-lab", keyboardEntrance: "/agent-lab/keyboard/enter", completedMessageIndex: "/agent-lab/keyboard/index" });
+    expect(JSON.stringify(discovery.publicExperimental)).not.toMatch(/(?:cap=|\/keyboard\/(?:choose|read|continue|preserve|reenter)|\/agent-lab\/(?:write|read))/);
+  });
+
+  it("publishes explicit crawler policy with an origin-correct sitemap", async () => {
+    const response = await SELF.fetch(`${origin}/robots.txt`), robots = await response.text();
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    for (const line of ["Allow: /", "Allow: /agent", "Allow: /agent-lab$", "Allow: /agent-lab/keyboard/index", "Allow: /agent-lab/keyboard/message", "Allow: /agent-lab/keyboard/author", "Allow: /llms.txt", "Allow: /.well-known/loom-agent"]) expect(robots).toContain(`${line}\n`);
+    for (const path of ["/login", "/me", "/projects", "/control-room", "/documents", "/project-documents", "/api", "/invitations", "/agent-lab/write", "/agent-lab/read", "/agent-lab/keyboard/choose", "/agent-lab/keyboard/read", "/agent-lab/keyboard/continue", "/agent-lab/keyboard/preserve", "/agent-lab/keyboard/reenter"]) expect(robots).toContain(`Disallow: ${path}\n`);
+    expect(robots).toContain(`Sitemap: ${origin}/sitemap.xml`);
+    expect(robots).not.toMatch(/(?:cap=|labkey_)/);
+  });
+
+  it("publishes only stable public URLs in valid, origin-based sitemap XML", async () => {
+    const response = await SELF.fetch(`${origin}/sitemap.xml`), xml = await response.text();
+    expect(response.headers.get("content-type")).toContain("application/xml");
+    expect(xml).toMatch(/^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">\n(?:  <url><loc>[^<]+<\/loc><\/url>\n)+<\/urlset>\n$/);
+    const locations = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match => match[1]);
+    expect(locations).toEqual(["/", "/agent", "/agent-lab", "/agent-lab/keyboard/index", "/llms.txt", "/.well-known/loom-agent"].map(path => origin + path));
+    for (const location of locations) expect(new URL(location).origin).toBe(origin);
+    expect(xml).not.toMatch(/(?:cap=|\/me|\/projects|\/documents|\/api|\/invitations|\/keyboard\/(?:enter|choose|read|continue|preserve|reenter|message|author))/);
+  });
+});
+
 describe("local development authentication", () => {
   const local = "http://localhost:8787";
   const devEnv = () => ({ ...env, DEV_AUTH_BYPASS: "1" });

@@ -166,8 +166,12 @@ administrators can leave; administrators can remove ordinary members, while
 only owners can remove administrators. Departure removes only the departing
 participant's project links and never their source documents.
 
-Public machine orientation is available at `/llms.txt`, strict protocol discovery
-at `/.well-known/loom-agent`, and a session-only bearer-token workbench at `/agent`.
+The public root now orients unfamiliar visitors to Loom's stable surfaces. Public
+machine orientation is available at `/llms.txt`, strict protocol discovery at
+`/.well-known/loom-agent`, and a session-only bearer-token workbench at `/agent`.
+The unauthenticated `/agent-lab` orientation describes a deliberately isolated
+native-link experiment and its public completed-message index; it does not grant
+access to ordinary participants, projects, or documents.
 
 Project owners manage machine credentials at
 `/api/projects/{project_id}/agent-credentials`. The raw opaque token is returned

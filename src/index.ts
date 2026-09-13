@@ -15,6 +15,7 @@ import { devAuthEnabled, establishDevSession, markDevAuth } from "./dev-auth";
 import { authenticateGptAction, checkIn, createCredential, listCredentials, machineRead, revokeCredential } from "./agent-access";
 import { gptActionOpenApi } from "./gpt-action-openapi";
 import { authorAgentLabKeyboard, chooseAgentLabKeyboard, enterAgentLab, enterAgentLabKeyboard, indexAgentLabKeyboard, messageAgentLabKeyboard, preserveAgentLabKeyboard, readAgentLab, readAgentLabKeyboard, reenterAgentLabKeyboard, continueAgentLabKeyboard, writeAgentLab } from "./agent-lab";
+import { agentLabOrientationPage, landingPage, llmsText, robotsText, sitemapXml, structuredDiscovery } from "./public-discovery";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
   const requested = new URL(request.url), callback = new URL(redirectUri);
@@ -82,6 +83,8 @@ async function discordCallback(request: Request, env: Env): Promise<Response> {
 
 async function handleRequest(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url), path = url.pathname;
+    if(request.method==="GET"&&path==="/")return landingPage();
+    if(request.method==="GET"&&path==="/agent-lab")return agentLabOrientationPage();
     if(request.method==="GET"&&path==="/agent-lab/enter")return enterAgentLab(request,env);
     if(request.method==="GET"&&path==="/agent-lab/write")return writeAgentLab(request,env);
     if(request.method==="GET"&&path==="/agent-lab/read")return readAgentLab(request,env);
@@ -94,8 +97,10 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     if(request.method==="GET"&&path==="/agent-lab/keyboard/index")return indexAgentLabKeyboard(request,env);
     if(request.method==="GET"&&path==="/agent-lab/keyboard/message")return messageAgentLabKeyboard(request,env);
     if(request.method==="GET"&&path==="/agent-lab/keyboard/author")return authorAgentLabKeyboard(request,env);
-    if(request.method==="GET"&&path==="/llms.txt")return new Response("# Loom\n\nLoom is a participant-owned document and project service.\nHumans authenticate with Discord at /login.\nMachine callers start at /agent and use opaque bearer credentials in the Authorization header.\nStrict discovery: /.well-known/loom-agent\n",{headers:{"content-type":"text/plain; charset=utf-8","cache-control":"public, max-age=3600"}});
-    if(request.method==="GET"&&path==="/.well-known/loom-agent")return json({service:"Loom",protocolVersion:"1",entrance:"/agent",authentication:{scheme:"Bearer",transport:"Authorization header"},endpoints:{introspection:"/api/agent/me",project:"/api/agent/project",documents:"/api/agent/documents",document:"/api/agent/documents/{document_id}",checkin:"/api/agent/check-in"},orientation:"/llms.txt"});
+    if(request.method==="GET"&&path==="/llms.txt")return llmsText();
+    if(request.method==="GET"&&path==="/.well-known/loom-agent")return json(structuredDiscovery,200,{"cache-control":"public, max-age=3600"});
+    if(request.method==="GET"&&path==="/robots.txt")return robotsText(request);
+    if(request.method==="GET"&&path==="/sitemap.xml")return sitemapXml(request);
     if(request.method==="GET"&&path==="/openapi/gpt-action.json")return json(gptActionOpenApi,200,{"cache-control":"public, max-age=3600"});
     if(path==="/api/gpt-action/authenticate")return authenticateGptAction(request,env);
     if(request.method==="GET"&&path==="/agent")return agentPage();
@@ -105,7 +110,6 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     if(path==="/api/agent/check-in")return checkIn(request,env);
     const agentDocumentMatch=path.match(/^\/api\/agent\/documents\/(doc_[a-z0-9]+)$/);
     if(agentDocumentMatch)return machineRead(request,env,"document",agentDocumentMatch[1]);
-    if (request.method === "GET" && path === "/") return Response.redirect(`${url.origin}/me`, 302);
     if (request.method === "GET" && path === "/login") return loginPage();
     if (request.method === "GET" && path === "/auth/discord") return discordStart(request, env);
     if (request.method === "GET" && path === "/auth/discord/callback") return discordCallback(request, env);
