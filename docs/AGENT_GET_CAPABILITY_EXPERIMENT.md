@@ -99,15 +99,21 @@ External Slice 2b testing surfaced a distinct entrance-address problem after the
 
 This is evidence that the tested external retrieval path reused or acted on a previously issued entrance response or capability. It does **not** establish which cache, retrieval, navigation, or intermediary layer caused that reuse. `Cache-Control: no-store` remains required but is empirically insufficient by itself for this experiment.
 
-Future keyboard experiments therefore require a unique entrance address for each run. The entrance URL must contain a fresh server- or operator-generated opaque nonce/path component that has no authority semantics beyond making the initial retrieval target unique. A suitable shape is conceptually:
+The entrance retrieval target still needs a unique address before the first capability-bearing state is exposed. The freshness component has no authority semantics. A suitable unique address remains:
 
 `GET /agent-lab/keyboard/enter?fresh=<opaque-random-value>`
 
-The server may ignore the freshness value when creating the chain; the request must still create a new chain and a new first choice capability exactly as the ordinary entrance does. The freshness value is not a bearer capability, must not authorize later actions, and should not be persisted as chain authority.
+The server may ignore the freshness value as authority when creating the chain. It is not a bearer capability, must not authorize later actions, and should not be persisted as chain authority.
 
-This entrance-only freshness mechanism is deliberately separate from successor capability rotation. Once a fresh entrance response has been retrieved, every successful character choice already issues a fresh capability and therefore naturally gives the next menu a state-specific URL. Do not add independent cache-buster parameters to successor choice/read URLs unless later evidence demonstrates a separate need.
+As of the next transport-hardening slice, callers must no longer be required to manufacture that nonce themselves. A request to the canonical stable entrance:
 
-The stable `/agent-lab/keyboard/enter` route may remain available for humans and compatibility, but controlled external-agent runs should use a never-before-used entrance address. Test prompts should receive that unique address directly rather than being expected to construct it.
+`GET /agent-lab/keyboard/enter`
+
+must redirect, before minting the keyboard chain, to a server-generated never-before-used `?fresh=<opaque>` entrance address. The fresh entrance then creates the new message chain and choice capability. Operator-supplied fresh addresses remain supported for controlled comparisons, but ordinary discovered use of the canonical entrance must work without an operator-provided nonce.
+
+This does not make the `fresh` value an authority token. It remains retrieval-address uniqueness only. Repeated origin-reaching requests to the canonical entrance must generate distinct fresh redirect targets.
+
+This entrance-only freshness mechanism is separate from successor capability rotation. Successful keyboard actions already issue fresh successor capabilities and do not need independent cache-buster parameters.
 
 ### Choose a symbol
 
@@ -194,6 +200,41 @@ Slice 2 requires an empty message to exist before the first symbol, while the Sl
 
 The authoritative current keyboard message must be persisted after every successful symbol choice. A simple dedicated message row whose `value` is atomically updated is sufficient; an append-only keystroke table is optional and must not be introduced merely for architectural elegance.
 
+## Refresh-safe capability views
+
+The original native-link keyboard returned the successor menu directly from the consuming action URL. That leaves the browser or retrieval client located on a URL whose capability has just been consumed. Reloading that successful page therefore replays the old action and produces a legitimate `403`, even though the user only intended to refresh the current state.
+
+The next transport-hardening slice fixes this without weakening single-use capabilities.
+
+Introduce one non-consuming refreshable state route:
+
+`GET /agent-lab/keyboard/view?cap=<current-capability>`
+
+The view route validates the current raw capability and renders the representation appropriate to its expected operation, but it must not consume the capability, mutate message state, or issue a successor merely because the view was loaded or refreshed.
+
+At minimum:
+
+- a current `choose` capability renders the current message value plus the 28 keyboard links;
+- a current `read` capability renders the single native **read** action for the completed message;
+- a current `continue` capability renders the exact completed value plus **next message** and **preserve author continuity** actions;
+- a current `reenter` capability renders the re-entry handoff URL as visible text and a native **re-enter author chain** action.
+
+Successful consuming actions continue to perform exactly one atomic state transition and issue exactly one successor as defined by the relevant protocol. Instead of returning the successor representation at the consumed action URL, they return an HTTP redirect to the successor `/view?cap=...` URL. The redirected-to view is then safe to refresh while its capability remains current.
+
+This applies to the whole keyboard lifecycle:
+
+`fresh enter -> view(choose) -> choose -> view(choose) -> ... -> done -> view(read) -> read -> view(continue) -> continue/preserve -> view(choose|reenter) -> ...`
+
+and to successful re-entry:
+
+`view(reenter) -> reenter -> view(choose)`
+
+The redirect changes representation location, not authority semantics. Action capabilities remain single-use. Refreshing an old view after its capability has been consumed may correctly reject; the important invariant is that after a successful action the client is redirected onto the newly current non-consuming view rather than left on the consumed action URL.
+
+The refreshable view is itself capability-bearing and ephemeral. It must remain excluded from sitemaps, discovery manifests, public orientation copy, and robots-allowed action surfaces. Raw capabilities remain hash-only in persistence.
+
+This transport refinement supersedes the older Slice 2b constraint that prohibited redirects. That prohibition was useful while hyperlink representation was the sole experimental variable; it is no longer the target behavior once refresh robustness is being tested.
+
 ## Response and HTTP behavior
 
 Keep the lab intentionally primitive and make the representation boundary explicit.
@@ -204,10 +245,11 @@ Keep the lab intentionally primitive and make the representation boundary explic
 - The completed-message read response remains `text/plain; charset=utf-8` and preserves the exact stored lowercase/space value.
 - Keyboard rejection responses remain simple plain text.
 - All `/agent-lab` responses use `Cache-Control: no-store`.
-- Controlled external-agent keyboard runs use a never-before-used entrance address as defined under **Fresh entrance addresses**. This is an entrance retrieval freshness mechanism, not a capability or authorization mechanism.
-- Every generated keyboard action URL contains the current fresh raw capability. A successful symbol choice issues a fresh successor capability, and `done` issues a fresh read capability, so successor hrefs are dynamically distinct across states.
-- Do not add an independent cache-buster/nonce parameter to successor choice/read URLs merely for URL uniqueness. The capability chain already supplies state-specific uniqueness and should remain directly observable.
-- Returned action URLs are absolute and directly usable as `href` values.
+- The canonical keyboard entrance self-generates a unique fresh entrance address before the first chain is minted; controlled tests may still provide their own never-before-used `?fresh=` address.
+- Every generated keyboard action URL contains the current fresh raw capability. Successful consuming actions issue a fresh successor capability and redirect to the non-consuming `/agent-lab/keyboard/view?cap=...` representation for that successor.
+- Do not add an independent cache-buster/nonce parameter to successor action or view URLs merely for URL uniqueness. The capability chain already supplies state-specific uniqueness.
+- Returned action URLs and redirect targets are absolute and directly usable.
+- Refreshing the current `view` URL before its action capability is consumed must be idempotent: no state change, no successor issuance, and no capability consumption.
 - Escape all dynamic HTML text and attribute values correctly even where current protocol values are constrained; do not create a generic unsafe interpolation pattern.
 - No forms, buttons, JavaScript, cookies, custom headers, redirects, or URL templates are required for the keyboard experiment.
 - The experiment deliberately uses GET for state-changing experimental operations. Do not generalize this pattern to normal Loom APIs.
@@ -284,13 +326,13 @@ Do not add:
 - arbitrary `value=` submission or free-form query construction;
 - discovery/indexing or `llms.txt` changes;
 - a lab homepage or human management UI;
-- redirects, alternate hosts, shell/curl-specific behavior, or fallback transports;
+- alternate hosts, shell/curl-specific behavior, or fallback transports;
 - participant/agent signup or identity;
 - project/document access;
 - work-for-access, credits, quotas, reputation, or agent messaging;
 - generalized GET mutation elsewhere in Loom;
 - autocomplete, word/phrase suggestions, dictionary completion, or any larger transport alphabet;
-- buttons, forms, JavaScript, redirects, or alternate interaction primitives;
+- buttons, forms, JavaScript, or alternate interaction primitives beyond native links plus the refresh-safety redirects defined above;
 - independent cache-buster query parameters on successor action URLs when the fresh capability already distinguishes successor state;
 - changes to ordinary agent authentication/authorization.
 
