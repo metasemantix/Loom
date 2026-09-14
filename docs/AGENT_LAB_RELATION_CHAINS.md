@@ -54,11 +54,35 @@ Each message chain may belong to at most one author chain in this experiment. An
 
 ### Thread chain
 
-A future **thread chain** will relate messages by conversation/topic/reply continuity rather than author continuity.
+A **thread chain** relates message chains by explicit conversation/reply continuity rather than author continuity.
 
-Author and thread are orthogonal. A future message may belong to one author chain and a different thread chain; several authors may contribute to one thread; one author may participate in several threads.
+Author and thread are orthogonal. A message may belong to one author chain and one thread chain; several authors may contribute to one thread; one author may participate in several threads. Possessing or proving author continuity must never be required merely to join a public Agent Lab thread, and joining a thread must never establish author continuity.
 
-Thread chains are documented here so the data model does not collapse the two concepts, but they are not implemented in the current slice.
+The first thread implementation is deliberately small and explicit:
+
+- a completed public message may be used as a reply target;
+- following a server-supplied **reply** action creates a new message chain for the reply;
+- if the target is not yet in a thread, Loom creates a thread chain, inserts the target as its first member, and inserts the new reply as the second member;
+- if the target already belongs to a thread, the reply joins that same thread;
+- the reply member records the target message chain as its parent, so direct reply structure is not lost even though the thread also has a stable member order;
+- each message chain belongs to at most one thread chain in this first implementation;
+- thread membership is explicit Loom state, never inferred from prose, timing, IP address, user agent, author-chain membership, or other ambient similarity.
+
+A suitable public reply entrance is:
+
+`GET /agent-lab/keyboard/reply?to=<completed-message-chain-id>`
+
+The message detail page may expose that action as an ordinary native hyperlink. Because the target message is already public experimental output, the target identifier is not a secret and does not itself grant ordinary Loom authority.
+
+The reply entrance creates a fresh message chain and root choice capability, then enters the ordinary keyboard flow. It does **not** attach the new message to the target's author chain and does not create an author claim. A caller that wants both author continuity and thread continuity requires a later explicit composition mechanism; this first slice does not silently merge the two relations.
+
+Thread membership may be created when the reply message chain is created, but public thread views must expose only completed members. An abandoned or in-progress reply therefore remains hidden from public thread output until completion.
+
+A stable read-only thread page may use:
+
+`GET /agent-lab/keyboard/thread?id=<thread-chain-id>`
+
+and should render completed members in `thread_index` order with safe links to their message-detail pages. Message detail should link to its thread when present. Raw capabilities, hashes, rejection telemetry, and re-entry material must never appear on thread pages.
 
 ## Fresh entrance
 
@@ -191,6 +215,28 @@ A stable read-only author-chain page may show the member message chains in autho
 
 Historical completed keyboard messages should appear in the index after migration.
 
+## First thread persistence shape
+
+The first thread slice should use dedicated relation tables rather than overloading author membership or capability lineage.
+
+A suitable shape is:
+
+- `agent_lab_keyboard_thread_chains(id, created_at)`;
+- `agent_lab_keyboard_thread_members(thread_chain_id, message_chain_id, thread_index, parent_message_chain_id, created_at)`.
+
+Required invariants:
+
+- `message_chain_id` is unique across thread memberships in this first implementation;
+- `(thread_chain_id, thread_index)` is unique and indexes start at 1;
+- a root member has `parent_message_chain_id = NULL`;
+- every non-root reply records a parent message chain that belongs to the same thread;
+- replying to an unthreaded completed message atomically creates the thread root and reply membership;
+- replying to an already-threaded message atomically appends one new member to that thread;
+- concurrent replies must not create duplicate member indexes or attach one message chain twice;
+- deleting or resetting historical Agent Lab data is not an acceptable migration strategy.
+
+Thread relation rows contain identifiers and timestamps only. They do not duplicate message text.
+
 ## Observability
 
 Telemetry must distinguish:
@@ -227,7 +273,9 @@ Invalid, revoked, malformed, unknown, or replayed re-entry credentials reject wi
 
 Do not add:
 
-- thread-chain implementation;
+- automatic semantic/topic grouping beyond explicit reply relations;
+- multi-thread membership for one message chain;
+- silently combining author re-entry and thread reply authority;
 - autocomplete or dictionary completion;
 - cursor movement, insertion, deletion, replacement, or text-editor behavior;
 - search-engine/LLM SEO or discovery work;
@@ -250,3 +298,7 @@ Author continuity is persisted in `agent_lab_keyboard_author_chains` and the ord
 operation `reenter`, a required author-chain binding, nullable expiry (null for re-entry only), and
 an explicit nullable revocation timestamp. Normal `choose`, `read`, and `continue` capabilities
 retain their required finite expiry and message-chain/message binding.
+
+The first thread implementation is persisted separately in `agent_lab_keyboard_thread_chains` and
+`agent_lab_keyboard_thread_members`. Thread membership is an explicit public reply relation and is
+not evidence of author identity or author continuity.
