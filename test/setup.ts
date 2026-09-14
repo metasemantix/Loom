@@ -16,6 +16,7 @@ import agentGetCapabilityExperiment from "../migrations/0014_agent_get_capabilit
 import agentLabKeyboard from "../migrations/0015_agent_lab_keyboard.sql?raw";
 import agentLabKeyboardContinuity from "../migrations/0016_agent_lab_keyboard_continuity.sql?raw";
 import agentLabAuthorReentry from "../migrations/0017_agent_lab_author_reentry.sql?raw";
+import agentLabKeyboardThreads from "../migrations/0018_agent_lab_keyboard_threads.sql?raw";
 
 function statements(sql:string){const result:string[]=[],lines:string[]=[],flush=()=>{const value=lines.join("\n").trim().replace(/;$/,"");lines.length=0;if(value)result.push(value)};let trigger=false;for(const line of sql.split("\n")){if(/^CREATE TRIGGER\b/.test(line.trim()))trigger=true;lines.push(line);if(trigger?/^END;$/.test(line.trim()):line.trim().endsWith(";")){flush();trigger=false}}flush();return result}
 async function apply(sql:string){for(const statement of statements(sql))await env.DB.prepare(statement).run()}
@@ -105,5 +106,10 @@ const keyboardAuthorMigration={
   capabilities:(await env.DB.prepare(`SELECT id,chain_id,message_id,predecessor_capability_id FROM agent_lab_keyboard_capabilities WHERE id LIKE 'akp_migration%' ORDER BY id`).all()).results,
   events:(await env.DB.prepare(`SELECT id,chain_id,message_id,outcome FROM agent_lab_keyboard_events WHERE id LIKE 'ake_migration%' ORDER BY id`).all()).results,
 };
+await apply(agentLabKeyboardThreads);
+const keyboardThreadMigration={
+  historicalThreads:(await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_thread_chains`).all()).results,
+  historicalMembers:(await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_thread_members`).all()).results,
+};
 const foreignKeyErrors=(await env.DB.prepare(`PRAGMA foreign_key_check`).all()).results;
-(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,migratedProseCompression,migratedStructuredColumns,compressionRowsBeforeExpansion,compressionRowsAfterExpansion,selectedCompressionAfterExpansion,keyboardBefore,keyboardAfter,keyboardAuthorMigration,foreignKeyErrors};
+(globalThis as typeof globalThis & {__loomMigrationRegression?:unknown}).__loomMigrationRegression={before,after,afterProjectDeletionMigration,migratedCredential,migratedProseCompression,migratedStructuredColumns,compressionRowsBeforeExpansion,compressionRowsAfterExpansion,selectedCompressionAfterExpansion,keyboardBefore,keyboardAfter,keyboardAuthorMigration,keyboardThreadMigration,foreignKeyErrors};
