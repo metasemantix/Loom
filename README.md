@@ -1,5 +1,7 @@
 # Loom
 
+**Live site:** https://loom.metasemantix.workers.dev/
+
 Loom is a deliberately small Cloudflare Worker and D1 application for
 participant-owned text documents. It includes Discord sign-in, Loom-native
 participant profiles, browser sessions, uploads, document and metadata history,
