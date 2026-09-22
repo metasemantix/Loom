@@ -4,6 +4,7 @@ import { hashSecret } from "../src/auth";
 
 const origin="https://loom.example";
 const get=(url:string)=>SELF.fetch(url.startsWith("http")?url:origin+url);
+const getManual=(url:string)=>SELF.fetch(url.startsWith("http")?url:origin+url,{redirect:"manual"});
 const decode=(s:string)=>s.replace(/&(amp|lt|gt|quot|#39);/g,x=>({"&amp;":"&","&lt;":"<","&gt;":">","&quot;":"\"","&#39;":"'"})[x]!);
 const anchors=(body:string)=>[...body.matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map(m=>({href:decode(m[1]),label:decode(m[2])}));
 type Menu={body:string;links:Map<string,string>;value:string};
@@ -14,6 +15,19 @@ async function junction(m:Menu){const done=await get(m.links.get("done")!),read=
 async function row(raw:string){return env.DB.prepare(`SELECT c.id capability_id,c.chain_id,c.message_id,c.author_chain_id,c.predecessor_capability_id,c.expected_operation,c.expires_at,c.revoked_at,c.consumed_at,m.value,m.completed_at FROM agent_lab_keyboard_capabilities c LEFT JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.token_hash=?`).bind(await hashSecret(raw)).first<any>()}
 
 describe("Agent Lab author continuity keyboard",()=>{
+  it("self-freshens entrance and keeps current capability views non-consuming",async()=>{
+    const before=(await env.DB.prepare(`SELECT count(*) n FROM agent_lab_keyboard_chains`).first<{n:number}>())!.n;
+    const entrances=await Promise.all([getManual("/agent-lab/keyboard/enter"),getManual("/agent-lab/keyboard/enter")]);
+    expect(entrances.map(x=>x.status)).toEqual([303,303]);expect(entrances[0].headers.get("location")).not.toBe(entrances[1].headers.get("location"));
+    expect((await env.DB.prepare(`SELECT count(*) n FROM agent_lab_keyboard_chains`).first<{n:number}>())!.n).toBe(before);
+    const fresh=await getManual(entrances[0].headers.get("location")!);expect(fresh.status).toBe(303);expect(fresh.headers.get("location")).toContain("/agent-lab/keyboard/view?cap=");
+    const viewUrl=fresh.headers.get("location")!,first=await menu(viewUrl),raw=token(first),stored=await row(raw);
+    await menu(viewUrl);await menu(viewUrl);expect(await row(raw)).toMatchObject({consumed_at:null,value:""});
+    const action=await getManual(first.links.get("a")!);expect(action.status).toBe(303);expect(action.headers.get("location")).toContain("/agent-lab/keyboard/view?cap=");
+    const successor=await menu(action.headers.get("location")!);expect(successor.value).toBe("a");await menu(action.headers.get("location")!);expect((await row(token(successor))).consumed_at).toBeNull();expect((await row(raw)).consumed_at).not.toBeNull();expect((await get(first.links.get("b")!)).status).toBe(403);expect(stored.chain_id).toBe((await row(token(successor))).chain_id);
+    for(const bad of ["bad","labkey_000000000000000000000000000000000000"])expect((await get(`/agent-lab/keyboard/view?cap=${bad}`)).status).toBe(403);
+  });
+
   it("creates one unaffiliated message chain and keeps the 28-link/128-symbol behavior",async()=>{
     const start=await menu("/agent-lab/keyboard/enter?fresh=unique");expect([...start.links.keys()]).toEqual([..."abcdefghijklmnopqrstuvwxyz","space","done"]);expect(new Set([...start.links.values()].map(x=>new URL(x).searchParams.get("cap"))).size).toBe(1);
     const initial=await row(token(start));expect(initial).toMatchObject({value:"",expected_operation:"choose",predecessor_capability_id:null});expect(await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_author_members WHERE message_chain_id=?`).bind(initial.chain_id).first()).toBeNull();
@@ -55,6 +69,21 @@ describe("Agent Lab author continuity keyboard",()=>{
     const regression=(globalThis as any).__loomMigrationRegression;expect(regression.keyboardAuthorMigration.messages).toHaveLength(3);expect(regression.keyboardAuthorMigration.messages[0].chain_id).toBe("akc_migration");expect(regression.keyboardAuthorMigration.messages[1].chain_id).not.toBe("akc_migration");expect(regression.keyboardAuthorMigration.memberships.map((x:any)=>x.author_index)).toEqual([1,2]);expect(regression.keyboardAuthorMigration.memberships.some((x:any)=>x.message_chain_id==="akc_migration_single")).toBe(false);expect(regression.keyboardAuthorMigration.capabilities[1].predecessor_capability_id).toBe("akp_migration");expect(regression.foreignKeyErrors).toEqual([]);
     const incomplete=await menu(),incompleteRow=await row(token(incomplete));const current=await write("safe"),currentRow=await row(token(current));await junction(current);await env.DB.prepare(`UPDATE agent_lab_keyboard_messages SET value='<b>&bad</b>',symbol_count=11 WHERE chain_id=?`).bind(currentRow.chain_id).run();const index=await (await get("/agent-lab/keyboard/index")).text();expect(index).toContain("&lt;b&gt;&amp;bad&lt;/b&gt;");expect(index).not.toContain("<b>&bad</b>");expect(index).not.toContain(incompleteRow.chain_id);expect(index).not.toMatch(/labkey_|token_hash|reentry-url/);
     const detail=await (await get(`/agent-lab/keyboard/message?id=${currentRow.chain_id}`)).text();expect(detail).toContain("&lt;b&gt;");expect(detail).not.toMatch(/labkey_|token_hash/);
+  });
+
+  it("creates explicit ordered threads without inferring author continuity",async()=>{
+    const rootMenu=await write("root"),root=await row(token(rootMenu));await junction(rootMenu);
+    expect((await get("/agent-lab/keyboard/reply?to=missing")).status).toBe(404);
+    const replyStart=await menu(`/agent-lab/keyboard/reply?to=${root.chain_id}`),reply=await row(token(replyStart));
+    expect(await env.DB.prepare(`SELECT * FROM agent_lab_keyboard_author_members WHERE message_chain_id=?`).bind(reply.chain_id).first()).toBeNull();
+    const membership=await env.DB.prepare(`SELECT thread_chain_id,thread_index,parent_message_chain_id FROM agent_lab_keyboard_thread_members WHERE message_chain_id=?`).bind(reply.chain_id).first<any>();expect(membership).toMatchObject({thread_index:2,parent_message_chain_id:root.chain_id});
+    const hidden=await (await get(`/agent-lab/keyboard/thread?id=${membership.thread_chain_id}`)).text();expect(hidden).toContain("root");expect(hidden).not.toContain(reply.chain_id);
+    let replyText=replyStart;for(const c of "<" /* unsupported: install escaped value directly for rendering assertion */)void c;
+    await env.DB.prepare(`UPDATE agent_lab_keyboard_messages SET value='&lt;',symbol_count=4 WHERE chain_id=?`).bind(reply.chain_id).run();await junction(replyText);
+    const rendered=await (await get(`/agent-lab/keyboard/thread?id=${membership.thread_chain_id}`)).text();expect(rendered.indexOf(root.chain_id)).toBeLessThan(rendered.indexOf(reply.chain_id));expect(rendered).toContain("&amp;lt;");expect(rendered).not.toMatch(/labkey_|token_hash/);
+    const nestedStart=await menu(`/agent-lab/keyboard/reply?to=${reply.chain_id}`),nested=await row(token(nestedStart)),nestedMembership=await env.DB.prepare(`SELECT thread_chain_id,thread_index,parent_message_chain_id FROM agent_lab_keyboard_thread_members WHERE message_chain_id=?`).bind(nested.chain_id).first<any>();expect(nestedMembership).toMatchObject({thread_chain_id:membership.thread_chain_id,thread_index:3,parent_message_chain_id:reply.chain_id});
+    const detail=await (await get(`/agent-lab/keyboard/message?id=${root.chain_id}`)).text();expect(detail).toContain(`/agent-lab/keyboard/thread?id=${membership.thread_chain_id}`);expect(detail).toContain(`/agent-lab/keyboard/reply?to=${root.chain_id}`);
+    expect((globalThis as any).__loomMigrationRegression.keyboardThreadMigration).toEqual({historicalThreads:[],historicalMembers:[]});
   });
 
   it("keeps Slice 1 and ordinary authentication isolated",async()=>{expect((await get("/agent-lab/enter")).status).toBe(200);expect((await get("/api/me")).status).toBe(401);expect((await env.DB.prepare(`PRAGMA foreign_key_check`).all()).results).toEqual([])});

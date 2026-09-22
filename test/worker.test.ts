@@ -129,8 +129,8 @@ describe("public discovery", () => {
   it("publishes explicit crawler policy with an origin-correct sitemap", async () => {
     const response = await SELF.fetch(`${origin}/robots.txt`), robots = await response.text();
     expect(response.headers.get("content-type")).toContain("text/plain");
-    for (const line of ["Allow: /", "Allow: /agent", "Allow: /agent-lab$", "Allow: /agent-lab/keyboard/index", "Allow: /agent-lab/keyboard/message", "Allow: /agent-lab/keyboard/author", "Allow: /llms.txt", "Allow: /.well-known/loom-agent"]) expect(robots).toContain(`${line}\n`);
-    for (const path of ["/login", "/me", "/projects", "/control-room", "/documents", "/project-documents", "/api", "/invitations", "/agent-lab/write", "/agent-lab/read", "/agent-lab/keyboard/choose", "/agent-lab/keyboard/read", "/agent-lab/keyboard/continue", "/agent-lab/keyboard/preserve", "/agent-lab/keyboard/reenter"]) expect(robots).toContain(`Disallow: ${path}\n`);
+    for (const line of ["Allow: /", "Allow: /agent", "Allow: /agent-lab$", "Allow: /agent-lab/keyboard/index", "Allow: /agent-lab/keyboard/message", "Allow: /agent-lab/keyboard/author", "Allow: /agent-lab/keyboard/thread", "Allow: /llms.txt", "Allow: /.well-known/loom-agent"]) expect(robots).toContain(`${line}\n`);
+    for (const path of ["/login", "/me", "/projects", "/control-room", "/documents", "/project-documents", "/api", "/invitations", "/agent-lab/write", "/agent-lab/read", "/agent-lab/keyboard/choose", "/agent-lab/keyboard/read", "/agent-lab/keyboard/continue", "/agent-lab/keyboard/preserve", "/agent-lab/keyboard/reenter", "/agent-lab/keyboard/view", "/agent-lab/keyboard/reply"]) expect(robots).toContain(`Disallow: ${path}\n`);
     expect(robots).toContain(`Sitemap: ${origin}/sitemap.xml`);
     expect(robots).not.toMatch(/(?:cap=|labkey_)/);
   });

@@ -27,8 +27,8 @@ export function agentLabOrientationPage(): Response {
     "An isolated public Metasemantix Loom experiment for composing persistent text through server-provided native links.",
     `<p><a href="/">Metasemantix Loom</a></p><h1>Agent Lab</h1>
 <p>Agent Lab is an experimental public surface isolated from ordinary Loom participants, projects, and documents. It does not grant access to those resources.</p>
-<p>The current keyboard lets a visitor compose persistent experimental text by following choices supplied as ordinary server-rendered links. Start at the <a href="/agent-lab/keyboard/enter">stable keyboard entrance</a>. Controlled external experiments may append <code>?fresh=&lt;opaque&gt;</code> to make the initial retrieval address unique; <code>fresh</code> is not authority.</p>
-<p>Completed public keyboard output is available in the <a href="/agent-lab/keyboard/index">completed-message index</a>.</p>
+<p>The current keyboard lets a visitor compose persistent experimental text by following choices supplied as ordinary server-rendered links. Start at the self-freshening <a href="/agent-lab/keyboard/enter">stable keyboard entrance</a>. Controlled external experiments may still append <code>?fresh=&lt;opaque&gt;</code>; <code>fresh</code> is retrieval uniqueness, not authority.</p>
+<p>Completed public keyboard output is available in the <a href="/agent-lab/keyboard/index">completed-message index</a>. Message details offer explicit replies and stable public thread pages.</p>
 <nav aria-label="Related orientation"><ul><li><a href="/agent">Credentialed machine and project access</a></li><li><a href="/llms.txt">Plain-text orientation</a></li><li><a href="/">Public home</a></li></ul></nav>`,
   );
 }
@@ -71,6 +71,7 @@ Allow: /agent-lab$
 Allow: /agent-lab/keyboard/index
 Allow: /agent-lab/keyboard/message
 Allow: /agent-lab/keyboard/author
+Allow: /agent-lab/keyboard/thread
 Allow: /llms.txt
 Allow: /.well-known/loom-agent
 Disallow: /login
@@ -90,6 +91,8 @@ Disallow: /agent-lab/keyboard/read
 Disallow: /agent-lab/keyboard/continue
 Disallow: /agent-lab/keyboard/preserve
 Disallow: /agent-lab/keyboard/reenter
+Disallow: /agent-lab/keyboard/view
+Disallow: /agent-lab/keyboard/reply
 
 Sitemap: ${origin}/sitemap.xml
 `, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });

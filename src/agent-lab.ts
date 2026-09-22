@@ -14,6 +14,10 @@ function html(body:string):Response {
   return new Response(body,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
 }
 
+function redirect(request:Request,path:string,parameters:Record<string,string>):Response {
+  return new Response(null,{status:303,headers:{location:absolute(request,path,parameters),"cache-control":"no-store"}});
+}
+
 function escapeHtml(value:string):string {
   return value.replace(/[&<>"']/g,character=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[character]!);
 }
@@ -109,14 +113,42 @@ async function rejectKeyboard(env:Env,operation:KeyboardOperation,raw:string|nul
 }
 
 export async function enterAgentLabKeyboard(request:Request,env:Env):Promise<Response> {
-  const fresh=new URL(request.url).searchParams.get("fresh");if(fresh!==null&&fresh.length>128)return text("Fresh entrance value exceeds the 128-character limit.\n",400);
+  const fresh=new URL(request.url).searchParams.get("fresh");
+  if(fresh===null)return redirect(request,"/agent-lab/keyboard/enter",{fresh:opaque("fresh")});
+  if(fresh.length>128)return text("Fresh entrance value exceeds the 128-character limit.\n",400);
   const now=new Date(),at=now.toISOString(),chainId=opaque("akc"),messageId=opaque("akm"),capabilityId=opaque("akp"),capability=opaque("labkey");
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_chains(id,created_at) VALUES(?,?)`).bind(chainId,at),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_messages(id,chain_id,value,symbol_count,created_at) VALUES(?,?, '',0,?)`).bind(messageId,chainId,at),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,token_hash,expected_operation,created_at,expires_at) VALUES(?,?,?,?, 'choose',?,?)`).bind(capabilityId,chainId,messageId,await hashSecret(capability),at,expires(now)),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) VALUES(?,?,?,?,'enter','created',0,?)`).bind(opaque("ake"),chainId,messageId,capabilityId,at),
-  ]);return keyboardMenu(request,"",capability);
+  ]);return redirect(request,"/agent-lab/keyboard/view",{cap:capability});
+}
+
+export async function viewAgentLabKeyboard(request:Request,env:Env):Promise<Response>{
+  const raw=new URL(request.url).searchParams.get("cap"),at=new Date().toISOString();
+  if(!raw||!keyboardCapabilityPattern.test(raw))return text("Capability rejected.\n",403);
+  const row=await keyboardCapability(env,raw);
+  const structurallyValid=!!row&&!row.revoked_at&&!row.consumed_at&&(row.expires_at===null||row.expires_at>at)&&(
+    row.expected_operation==="reenter"
+      ? !!row.author_chain_id&&!row.chain_id&&!row.message_id&&!row.message_chain_id&&row.expires_at===null
+      : !!row.chain_id&&!!row.message_id&&row.chain_id===row.message_chain_id&&!row.author_chain_id&&row.expires_at!==null
+  );
+  if(!structurallyValid||!row||!["choose","read","continue","reenter"].includes(row.expected_operation))return text("Capability rejected.\n",403);
+  if(row.expected_operation==="choose"){
+    if(row.completed_at||row.symbol_count===null||row.symbol_count>128)return text("Capability rejected.\n",403);
+    const message=await env.DB.prepare(`SELECT value FROM agent_lab_keyboard_messages WHERE id=?`).bind(row.message_id).first<{value:string}>();
+    return message?keyboardMenu(request,message.value,raw):text("Capability rejected.\n",403);
+  }
+  if(row.expected_operation==="reenter"){
+    const target=absolute(request,"/agent-lab/keyboard/reenter",{cap:raw});
+    return html(`<!doctype html>\n<meta charset="utf-8">\n<pre id="reentry-url">${escapeHtml(target)}</pre>\n<a href="${escapeHtml(target)}">re-enter author chain</a>\n`);
+  }
+  if(!row.completed_at)return text("Capability rejected.\n",403);
+  if(row.expected_operation==="read")return html(`<!doctype html>\n<meta charset="utf-8">\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/read",{cap:raw,id:row.message_id!}))}">read</a>\n`);
+  const message=await env.DB.prepare(`SELECT value FROM agent_lab_keyboard_messages WHERE id=?`).bind(row.message_id).first<{value:string}>();
+  if(!message)return text("Capability rejected.\n",403);
+  return html(`<!doctype html>\n<meta charset="utf-8">\n<pre id="value">${escapeHtml(message.value)}</pre>\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/continue",{cap:raw}))}">next message</a>\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/preserve",{cap:raw}))}">preserve author continuity</a>\n`);
 }
 
 export async function chooseAgentLabKeyboard(request:Request,env:Env):Promise<Response> {
@@ -130,14 +162,14 @@ export async function chooseAgentLabKeyboard(request:Request,env:Env):Promise<Re
       env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,predecessor_capability_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,message_id,id,?,'read',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,await hashSecret(next),at,expires(now),consumptionId),
       env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) SELECT ?,c.chain_id,c.message_id,c.id,'complete','allowed',m.symbol_count,? FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.consumption_id=?`).bind(opaque("ake"),at,consumptionId),
     ]);if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"choose",capability);
-    const message=await env.DB.prepare(`SELECT message_id id FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(consumptionId).first<{id:string}>();if(!message)throw new Error("Completed keyboard capability has no message");return html(`<!doctype html>\n<meta charset="utf-8">\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/read",{cap:next,id:message.id}))}">read</a>\n`);
+    return redirect(request,"/agent-lab/keyboard/view",{cap:next});
   }
   const symbol=choice==="space"?" ":choice;const results=await env.DB.batch([
     env.DB.prepare(`UPDATE agent_lab_keyboard_capabilities SET consumed_at=?,consumption_id=? WHERE token_hash=? AND expected_operation='choose' AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM agent_lab_keyboard_messages m WHERE m.id=message_id AND m.chain_id=chain_id AND m.completed_at IS NULL AND m.symbol_count<128)`).bind(at,consumptionId,hash,at),
     env.DB.prepare(`UPDATE agent_lab_keyboard_messages SET value=value||?,symbol_count=symbol_count+1 WHERE id=(SELECT message_id FROM agent_lab_keyboard_capabilities WHERE consumption_id=?) AND completed_at IS NULL AND symbol_count<128`).bind(symbol,consumptionId),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,predecessor_capability_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,message_id,id,?,'choose',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,await hashSecret(next),at,expires(now),consumptionId),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) SELECT ?,c.chain_id,c.message_id,c.id,'choose','allowed',m.symbol_count,? FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.consumption_id=?`).bind(opaque("ake"),at,consumptionId),
-  ]);if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"choose",capability);const message=await env.DB.prepare(`SELECT value FROM agent_lab_keyboard_messages WHERE id=(SELECT message_id FROM agent_lab_keyboard_capabilities WHERE consumption_id=?)`).bind(consumptionId).first<{value:string}>();if(!message)throw new Error("Consumed keyboard choice has no message");return keyboardMenu(request,message.value,next);
+  ]);if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"choose",capability);return redirect(request,"/agent-lab/keyboard/view",{cap:next});
 }
 
 export async function readAgentLabKeyboard(request:Request,env:Env):Promise<Response> {
@@ -147,7 +179,7 @@ export async function readAgentLabKeyboard(request:Request,env:Env):Promise<Resp
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,predecessor_capability_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,chain_id,message_id,id,?,'continue',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,await hashSecret(next),at,expires(now),consumptionId),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) SELECT ?,c.chain_id,c.message_id,c.id,'read','allowed',m.symbol_count,? FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id WHERE c.consumption_id=?`).bind(opaque("ake"),at,consumptionId),
   ]);if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"read",capability,messageId);const message=await env.DB.prepare(`SELECT value FROM agent_lab_keyboard_messages WHERE id=?`).bind(messageId).first<{value:string}>();if(!message)throw new Error("Consumed keyboard read has no message");
-  return html(`<!doctype html>\n<meta charset="utf-8">\n<pre id="value">${escapeHtml(message.value)}</pre>\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/continue",{cap:next}))}">next message</a>\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/preserve",{cap:next}))}">preserve author continuity</a>\n`);
+  return redirect(request,"/agent-lab/keyboard/view",{cap:next});
 }
 
 async function consumeDecision(request:Request,env:Env,mode:"continue"|"preserve"):Promise<Response>{
@@ -169,7 +201,7 @@ async function consumeDecision(request:Request,env:Env,mode:"continue"|"preserve
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,author_chain_id,capability_id,operation,outcome,symbol_count,created_at) SELECT ?,c.chain_id,c.message_id,am.author_chain_id,c.id,'preserve','allowed',m.symbol_count,? FROM agent_lab_keyboard_capabilities c JOIN agent_lab_keyboard_messages m ON m.id=c.message_id JOIN agent_lab_keyboard_author_members am ON am.message_chain_id=c.chain_id WHERE c.consumption_id=?`).bind(opaque("ake"),at,use)
   );
   const results=await env.DB.batch(common);if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"continue",capability,undefined,undefined,mode);
-  if(mode==="continue")return keyboardMenu(request,"",next);const reentry=absolute(request,"/agent-lab/keyboard/reenter",{cap:next});return html(`<!doctype html>\n<meta charset="utf-8">\n<pre id="reentry-url">${escapeHtml(reentry)}</pre>\n<a href="${escapeHtml(reentry)}">re-enter author chain</a>\n`);
+  return redirect(request,"/agent-lab/keyboard/view",{cap:next});
 }
 export const continueAgentLabKeyboard=(request:Request,env:Env)=>consumeDecision(request,env,"continue");
 export const preserveAgentLabKeyboard=(request:Request,env:Env)=>consumeDecision(request,env,"preserve");
@@ -183,7 +215,7 @@ export async function reenterAgentLabKeyboard(request:Request,env:Env):Promise<R
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_author_members(author_chain_id,message_chain_id,author_index,created_at) SELECT author_chain_id,?,(SELECT MAX(author_index)+1 FROM agent_lab_keyboard_author_members WHERE author_chain_id=c.author_chain_id),? FROM agent_lab_keyboard_capabilities c WHERE consumption_id=?`).bind(chainId,at,use),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,predecessor_capability_id,token_hash,expected_operation,created_at,expires_at) SELECT ?,?,?,id,?,'choose',?,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(nextId,chainId,messageId,await hashSecret(next),at,expires(now),use),
     env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,author_chain_id,capability_id,operation,outcome,symbol_count,created_at) SELECT ?,?,?,author_chain_id,id,'reenter','allowed',0,? FROM agent_lab_keyboard_capabilities WHERE consumption_id=?`).bind(opaque("ake"),chainId,messageId,at,use),
-  ]);if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"reenter",capability);return keyboardMenu(request,"",next);
+  ]);if((results[0].meta.changes??0)!==1)return rejectKeyboard(env,"reenter",capability);return redirect(request,"/agent-lab/keyboard/view",{cap:next});
 }
 
 function publicPage(body:string,status=200):Response{return new Response(`<!doctype html>\n<meta charset="utf-8">\n${body}`,{status,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}})}
@@ -192,8 +224,35 @@ export async function indexAgentLabKeyboard(request:Request,env:Env):Promise<Res
   const items=rows.map(row=>`<li><pre class="value">${escapeHtml(row.value)}</pre><time>${escapeHtml(row.completed_at)}</time> <code>${escapeHtml(row.chain_id)}</code>${row.author_chain_id?` <a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/author",{id:row.author_chain_id}))}">${escapeHtml(row.author_chain_id)}</a>`:""} <a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/message",{id:row.chain_id}))}">detail</a></li>`).join("\n");return publicPage(`<ol>\n${items}\n</ol>\n`);
 }
 export async function messageAgentLabKeyboard(request:Request,env:Env):Promise<Response>{
-  const id=new URL(request.url).searchParams.get("id")??"",row=await env.DB.prepare(`SELECT m.chain_id,m.value,m.completed_at,am.author_chain_id FROM agent_lab_keyboard_messages m LEFT JOIN agent_lab_keyboard_author_members am ON am.message_chain_id=m.chain_id WHERE m.chain_id=? AND m.completed_at IS NOT NULL`).bind(id).first<{chain_id:string;value:string;completed_at:string;author_chain_id:string|null}>();if(!row)return publicPage("<p>Not found.</p>\n",404);return publicPage(`<pre id="value">${escapeHtml(row.value)}</pre>\n<time>${escapeHtml(row.completed_at)}</time>\n<code>${escapeHtml(row.chain_id)}</code>${row.author_chain_id?`\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/author",{id:row.author_chain_id}))}">${escapeHtml(row.author_chain_id)}</a>`:""}\n`);
+  const id=new URL(request.url).searchParams.get("id")??"",row=await env.DB.prepare(`SELECT m.chain_id,m.value,m.completed_at,am.author_chain_id,tm.thread_chain_id FROM agent_lab_keyboard_messages m LEFT JOIN agent_lab_keyboard_author_members am ON am.message_chain_id=m.chain_id LEFT JOIN agent_lab_keyboard_thread_members tm ON tm.message_chain_id=m.chain_id WHERE m.chain_id=? AND m.completed_at IS NOT NULL`).bind(id).first<{chain_id:string;value:string;completed_at:string;author_chain_id:string|null;thread_chain_id:string|null}>();if(!row)return publicPage("<p>Not found.</p>\n",404);return publicPage(`<pre id="value">${escapeHtml(row.value)}</pre>\n<time>${escapeHtml(row.completed_at)}</time>\n<code>${escapeHtml(row.chain_id)}</code>${row.author_chain_id?`\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/author",{id:row.author_chain_id}))}">${escapeHtml(row.author_chain_id)}</a>`:""}${row.thread_chain_id?`\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/thread",{id:row.thread_chain_id}))}">thread ${escapeHtml(row.thread_chain_id)}</a>`:""}\n<a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/reply",{to:row.chain_id}))}">reply</a>\n`);
 }
 export async function authorAgentLabKeyboard(request:Request,env:Env):Promise<Response>{
   const id=new URL(request.url).searchParams.get("id")??"",exists=await env.DB.prepare(`SELECT id FROM agent_lab_keyboard_author_chains WHERE id=?`).bind(id).first();if(!exists)return publicPage("<p>Not found.</p>\n",404);const rows=(await env.DB.prepare(`SELECT am.author_index,m.chain_id,m.value,m.completed_at FROM agent_lab_keyboard_author_members am JOIN agent_lab_keyboard_messages m ON m.chain_id=am.message_chain_id WHERE am.author_chain_id=? AND m.completed_at IS NOT NULL ORDER BY am.author_index`).bind(id).all<{author_index:number;chain_id:string;value:string;completed_at:string}>()).results;return publicPage(`<code>${escapeHtml(id)}</code>\n<ol>\n${rows.map(row=>`<li value="${row.author_index}"><pre>${escapeHtml(row.value)}</pre><code>${escapeHtml(row.chain_id)}</code> <a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/message",{id:row.chain_id}))}">detail</a></li>`).join("\n")}\n</ol>\n`);
+}
+
+export async function replyAgentLabKeyboard(request:Request,env:Env):Promise<Response>{
+  const target=new URL(request.url).searchParams.get("to")??"";
+  const completed=await env.DB.prepare(`SELECT chain_id FROM agent_lab_keyboard_messages WHERE chain_id=? AND completed_at IS NOT NULL`).bind(target).first<{chain_id:string}>();
+  if(!completed)return publicPage("<p>Not found.</p>\n",404);
+  const existing=await env.DB.prepare(`SELECT thread_chain_id FROM agent_lab_keyboard_thread_members WHERE message_chain_id=?`).bind(target).first<{thread_chain_id:string}>();
+  // A deterministic root-derived ID makes simultaneous first replies converge.
+  const threadId=existing?.thread_chain_id??`akt_${(await hashSecret(target)).slice(0,36)}`;
+  const now=new Date(),at=now.toISOString(),chainId=opaque("akc"),messageId=opaque("akm"),capabilityId=opaque("akp"),capability=opaque("labkey");
+  await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO agent_lab_keyboard_thread_chains(id,created_at) VALUES(?,?)`).bind(threadId,at),
+    env.DB.prepare(`INSERT OR IGNORE INTO agent_lab_keyboard_thread_members(thread_chain_id,message_chain_id,thread_index,parent_message_chain_id,created_at) VALUES(?,?,1,NULL,?)`).bind(threadId,target,at),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_chains(id,created_at) VALUES(?,?)`).bind(chainId,at),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_messages(id,chain_id,value,symbol_count,created_at) VALUES(?,?, '',0,?)`).bind(messageId,chainId,at),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_thread_members(thread_chain_id,message_chain_id,thread_index,parent_message_chain_id,created_at) SELECT ?,?,COALESCE(MAX(thread_index),0)+1,?,? FROM agent_lab_keyboard_thread_members WHERE thread_chain_id=?`).bind(threadId,chainId,target,at,threadId),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_capabilities(id,chain_id,message_id,token_hash,expected_operation,created_at,expires_at) VALUES(?,?,?,?, 'choose',?,?)`).bind(capabilityId,chainId,messageId,await hashSecret(capability),at,expires(now)),
+    env.DB.prepare(`INSERT INTO agent_lab_keyboard_events(id,chain_id,message_id,capability_id,operation,outcome,symbol_count,created_at) VALUES(?,?,?,?,'enter','created',0,?)`).bind(opaque("ake"),chainId,messageId,capabilityId,at),
+  ]);
+  return redirect(request,"/agent-lab/keyboard/view",{cap:capability});
+}
+
+export async function threadAgentLabKeyboard(request:Request,env:Env):Promise<Response>{
+  const id=new URL(request.url).searchParams.get("id")??"",exists=await env.DB.prepare(`SELECT id FROM agent_lab_keyboard_thread_chains WHERE id=?`).bind(id).first();
+  if(!exists)return publicPage("<p>Not found.</p>\n",404);
+  const rows=(await env.DB.prepare(`SELECT tm.thread_index,tm.parent_message_chain_id,m.chain_id,m.value,m.completed_at FROM agent_lab_keyboard_thread_members tm JOIN agent_lab_keyboard_messages m ON m.chain_id=tm.message_chain_id WHERE tm.thread_chain_id=? AND m.completed_at IS NOT NULL ORDER BY tm.thread_index`).bind(id).all<{thread_index:number;parent_message_chain_id:string|null;chain_id:string;value:string;completed_at:string}>()).results;
+  return publicPage(`<code>${escapeHtml(id)}</code>\n<ol>\n${rows.map(row=>`<li value="${row.thread_index}"><pre>${escapeHtml(row.value)}</pre><a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/message",{id:row.chain_id}))}"><code>${escapeHtml(row.chain_id)}</code></a>${row.parent_message_chain_id?` <span>reply to <a href="${escapeHtml(absolute(request,"/agent-lab/keyboard/message",{id:row.parent_message_chain_id}))}"><code>${escapeHtml(row.parent_message_chain_id)}</code></a></span>`:` <span>root</span>`}</li>`).join("\n")}\n</ol>\n`);
 }

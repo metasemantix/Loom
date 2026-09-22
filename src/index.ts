@@ -14,7 +14,7 @@ import { cancelProjectDeletion, scheduleProjectDeletion } from "./project-deleti
 import { devAuthEnabled, establishDevSession, markDevAuth } from "./dev-auth";
 import { authenticateGptAction, checkIn, createCredential, listCredentials, machineRead, revokeCredential } from "./agent-access";
 import { gptActionOpenApi } from "./gpt-action-openapi";
-import { authorAgentLabKeyboard, chooseAgentLabKeyboard, enterAgentLab, enterAgentLabKeyboard, indexAgentLabKeyboard, messageAgentLabKeyboard, preserveAgentLabKeyboard, readAgentLab, readAgentLabKeyboard, reenterAgentLabKeyboard, continueAgentLabKeyboard, writeAgentLab } from "./agent-lab";
+import { authorAgentLabKeyboard, chooseAgentLabKeyboard, enterAgentLab, enterAgentLabKeyboard, indexAgentLabKeyboard, messageAgentLabKeyboard, preserveAgentLabKeyboard, readAgentLab, readAgentLabKeyboard, reenterAgentLabKeyboard, continueAgentLabKeyboard, replyAgentLabKeyboard, threadAgentLabKeyboard, viewAgentLabKeyboard, writeAgentLab } from "./agent-lab";
 import { agentLabOrientationPage, landingPage, llmsText, robotsText, sitemapXml, structuredDiscovery } from "./public-discovery";
 
 function canonicalLocalOAuthStart(request: Request, redirectUri: string): Response | null {
@@ -89,6 +89,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     if(request.method==="GET"&&path==="/agent-lab/write")return writeAgentLab(request,env);
     if(request.method==="GET"&&path==="/agent-lab/read")return readAgentLab(request,env);
     if(request.method==="GET"&&path==="/agent-lab/keyboard/enter")return enterAgentLabKeyboard(request,env);
+    if(request.method==="GET"&&path==="/agent-lab/keyboard/view")return viewAgentLabKeyboard(request,env);
     if(request.method==="GET"&&path==="/agent-lab/keyboard/choose")return chooseAgentLabKeyboard(request,env);
     if(request.method==="GET"&&path==="/agent-lab/keyboard/read")return readAgentLabKeyboard(request,env);
     if(request.method==="GET"&&path==="/agent-lab/keyboard/continue")return continueAgentLabKeyboard(request,env);
@@ -97,6 +98,8 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     if(request.method==="GET"&&path==="/agent-lab/keyboard/index")return indexAgentLabKeyboard(request,env);
     if(request.method==="GET"&&path==="/agent-lab/keyboard/message")return messageAgentLabKeyboard(request,env);
     if(request.method==="GET"&&path==="/agent-lab/keyboard/author")return authorAgentLabKeyboard(request,env);
+    if(request.method==="GET"&&path==="/agent-lab/keyboard/reply")return replyAgentLabKeyboard(request,env);
+    if(request.method==="GET"&&path==="/agent-lab/keyboard/thread")return threadAgentLabKeyboard(request,env);
     if(request.method==="GET"&&path==="/llms.txt")return llmsText();
     if(request.method==="GET"&&path==="/.well-known/loom-agent")return json(structuredDiscovery,200,{"cache-control":"public, max-age=3600"});
     if(request.method==="GET"&&path==="/robots.txt")return robotsText(request);
